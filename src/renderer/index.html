@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src * data: blob:; script-src 'self' 'unsafe-inline';" />
+  <title>Gestão RRBEC</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+  <!-- LOGIN SCREEN -->
+  <div id="login-screen" class="login-screen hidden">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="logo-icon">🍺</div>
+        <h1>RRBEC</h1>
+        <p>Gestão de Bar & Restaurante</p>
+      </div>
+      <form id="login-form" class="login-form">
+        <div class="field-group">
+          <label for="username">Usuário</label>
+          <input type="text" id="username" placeholder="Digite seu usuário" autocomplete="username" required />
+        </div>
+        <div class="field-group">
+          <label for="password">Senha</label>
+          <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" required />
+        </div>
+        <div id="login-error" class="login-error hidden"></div>
+        <button type="submit" id="login-btn" class="btn btn-primary btn-lg">
+          <span id="login-btn-text">Entrar</span>
+          <span id="login-spinner" class="spinner hidden"></span>
+        </button>
+      </form>
+
+      <div class="login-config">
+        <a href="#" id="login-config-toggle"
+          style="font-size: 0.75rem; color: var(--text-muted); text-decoration: none;">⚙️ Configurações de Conexão</a>
+        <div id="login-config-container" class="hidden"
+          style="margin-top: 15px; text-align: left; border-top: 1px solid var(--border); padding-top: 15px;">
+          <div class="field-group">
+            <label style="font-size: 0.7rem; color: var(--text-secondary);">URL da API</label>
+            <input type="text" id="login-api-url" placeholder="http://localhost:8000/api/v1"
+              style="font-size: 0.8rem; padding: 8px;" />
+            <button class="btn btn-secondary btn-sm" id="btn-save-login-config"
+              style="width: 100%; margin-top: 8px; font-size: 0.75rem;">💾 Salvar URL</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="app" class="app-layout hidden">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-icon-sm">🍺</div>
+        <span class="brand-name">RRBEC</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-page="dashboard">
+          <span class="nav-icon">📊</span><span class="nav-label">Dashboard</span>
+        </a>
+        <a href="#" class="nav-item" data-page="mesas">
+          <span class="nav-icon">🪑</span><span class="nav-label">Mesas</span>
+        </a>
+        <a href="#" class="nav-item" data-page="comandas">
+          <span class="nav-icon">📋</span><span class="nav-label">Comandas</span>
+        </a>
+        <a href="#" class="nav-item" data-page="pedidos">
+          <span class="nav-icon">🛒</span><span class="nav-label">Pedidos</span>
+        </a>
+        <a href="#" class="nav-item" data-page="produtos">
+          <span class="nav-icon">🍔</span><span class="nav-label">Produtos</span>
+        </a>
+        <a href="#" class="nav-item" data-page="clientes">
+          <span class="nav-icon">👥</span><span class="nav-label">Clientes</span>
+        </a>
+        <a href="#" class="nav-item" data-page="pagamentos">
+          <span class="nav-icon">💳</span><span class="nav-label">Pagamentos</span>
+        </a>
+        <a href="#" class="nav-item" data-page="config">
+          <span class="nav-icon">🎛️</span><span class="nav-label">Configurações</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div id="user-profile"
+          style="margin-bottom: 8px; padding: 0 10px; font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: center; gap: 8px;">
+          <div
+            style="width: 28px; height: 28px; background: var(--primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.7rem;"
+            id="user-initials">?</div>
+          <div style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" id="user-display-name">
+            Usuário</div>
+        </div>
+        <button id="logout-btn" class="btn btn-ghost btn-sm">
+          <span>⬅️</span> Sair
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <div id="page-container"></div>
+    </main>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- MODAL -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal-box" id="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-title">Título</h3>
+        <button id="modal-close" class="modal-close">✕</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+      <div id="modal-footer" class="modal-footer"></div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+
+</html>
