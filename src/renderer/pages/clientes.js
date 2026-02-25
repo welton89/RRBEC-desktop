@@ -97,7 +97,6 @@ function renderClientesTable(data) {
               <div style="display:flex;gap:6px">
                 <button class="btn btn-info btn-sm btn-hist-cli" data-id="${c.id}" title="Ver Fiados">📜</button>
                 <button class="btn btn-secondary btn-sm btn-edit-cli" data-id="${c.id}">Editar</button>
-                <button class="btn btn-danger btn-sm btn-del-cli" data-id="${c.id}">Excluir</button>
               </div>
             </td>
           </tr>`;
@@ -119,13 +118,7 @@ function renderClientesTable(data) {
     });
   });
 
-  wrap.querySelectorAll('.btn-del-cli').forEach(btn =>
-    btn.addEventListener('click', async () => {
-      const r = await window.electronAPI.delete(`/clients/${btn.dataset.id}/`);
-      if (r.ok) { showToast('Cliente excluído!', 'success'); loadClientes(); }
-      else showToast(r.error, 'error');
-    })
-  );
+
 }
 
 function filtrarClientes() {

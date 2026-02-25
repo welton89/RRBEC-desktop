@@ -174,6 +174,10 @@ function abrirModalProduto(produto, categorias) {
           <label>Descrição</label>
           <input type="text" id="prod-desc" class="form-control" value="${produto?.description || ''}" placeholder="Descrição opcional" />
         </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label>Imagem</label>
+          <input type="file" id="prod-img" accept="image/*" class="form-control" />
+        </div>
       </div>`,
     footer: `
       <button class="btn btn-secondary btn-md" onclick="closeModal()">Cancelar</button>
@@ -185,6 +189,7 @@ function abrirModalProduto(produto, categorias) {
     const data = {
       name: document.getElementById('prod-nome').value,
       description: document.getElementById('prod-desc').value,
+      //image: document.getElementById('prod-img').value,
       price: parseFloat(document.getElementById('prod-preco').value) || 0,
       quantity: parseInt(document.getElementById('prod-qty').value) || 0,
       category: catVal,
