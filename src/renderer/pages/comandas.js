@@ -118,9 +118,11 @@ function renderComandasTable(data) {
               <div style="display:flex;gap:6px">
                 <button class="btn btn-secondary btn-sm btn-itens" data-id="${c.id}" title="Itens">🛒</button>
                 ${ativa ? `<button class="btn btn-success btn-sm btn-receber" data-id="${c.id}" title="Receber">💰</button>` : ''}
-                ${ativa && c.status !== 'PAYING' ? `<button class="btn btn-warning btn-sm btn-pagar" data-id="${c.id}" title="Avisar Pagamento">⏳</button>` : ''}
-                ${ativa ? `<button class="btn btn-danger btn-sm btn-excluir" data-id="${c.id}" title="Excluir">🗑️</button>` : ''}
-              </div>
+                ${ativa && c.status === 'OPEN' ? `<button class="btn btn-warning btn-sm btn-pagar" data-id="${c.id}" title="Avisar Pagamento">⏳</button>` : ''}
+                ${ativa && c.status === 'PAYING' ? `<button class="btn btn-warning btn-sm btn-reopen" data-id="${c.id}" title="Reabrir Comanda">Reabrir</button>` : ''}
+
+              
+                </div>
             </td>
           </tr>`;
   }).join('')}
@@ -142,6 +144,15 @@ function renderComandasTable(data) {
     btn.addEventListener('click', async () => {
       const r = await window.electronAPI.patch(`/comandas/${btn.dataset.id}/`, { status: 'PAYING' });
       if (r.ok) { showToast('Comanda em fase de pagamento!', 'info'); loadComandas(_mesasRef); }
+      else showToast(r.error, 'error');
+    });
+  });
+
+    // Listener para botão "Reabrir" (muda p/ OPEN)
+  wrap.querySelectorAll('.btn-reopen').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const r = await window.electronAPI.patch(`/comandas/${btn.dataset.id}/`, { status: 'OPEN' });
+      if (r.ok) { showToast('Comanda reaberta!', 'info'); loadComandas(_mesasRef); }
       else showToast(r.error, 'error');
     });
   });
@@ -263,7 +274,7 @@ async function abrirItensComanda(comandaIdOrObj) {
 
   openModal({
     full: true,
-    title: `🛒 PDV: Comanda #${comanda.id} — ${comanda.name || ''} (${comanda.mesa_name || ''})`,
+    title: `🛒 #${comanda.id} — ${comanda.name || ''} (${comanda.mesa_name || ''}) — ${formatDate(comanda.dt_open)}`,
     body: `
       <div class="pdv-container">
         <!-- Lado Esquerdo: Itens da Comanda -->
@@ -348,7 +359,7 @@ async function abrirItensComanda(comandaIdOrObj) {
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
             <button class="btn btn-success btn-lg" id="btn-pdv-receber">💰 Receber</button>
             <button class="btn btn-danger btn-lg" id="btn-pdv-excluir">🗑️ Excluir</button>
-          </div>
+            </div>
         ` : ''}
       </div>`;
 
@@ -440,9 +451,9 @@ async function abrirItensComanda(comandaIdOrObj) {
 
     const filtrados = todosProdutos.filter(p => !filtro || p.name.toLowerCase().includes(filtro.toLowerCase())).slice(0, 20);
 
-    console.log('Produtos carregados no PDV:', todosProdutos);
+   // console.log('Produtos carregados no PDV:', todosProdutos);
     container.innerHTML = filtrados.map(p => {
-      const imgTarget = p.image ? `url('${p.image}')` : 'none';
+      const imgTarget = p.image ? `url('${p.image}')` : `url('https://wallpapers.com/images/featured/fundo-abstrato-escuro-27kvn4ewpldsngbu.jpg')`;
       return `
         <div class="pdv-product-card" data-id="${p.id}">
           <div class="pdv-product-bg" style="background-image: ${imgTarget}"></div>
