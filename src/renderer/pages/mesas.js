@@ -28,8 +28,8 @@ async function loadMesas() {
 
     // Carrega mesas e comandas em paralelo para determinar ocupação
     const [mesasRes, comandasRes] = await Promise.all([
-        window.electronAPI.get('/mesas/'),
-        window.electronAPI.get('/comandas/'),
+        window.electronAPI.get('/mesas'),
+        window.electronAPI.get('/comandas'),
     ]);
 
     if (!mesasRes.ok) {
@@ -103,7 +103,7 @@ function abrirDetalheMesa(mesa, ocupada) {
     });
 
     document.getElementById('btn-del-mesa').addEventListener('click', async () => {
-        const r = await window.electronAPI.delete(`/mesas/${mesa.id}/`);
+        const r = await window.electronAPI.delete(`/mesas/${mesa.id}`);
         if (r.ok) { showToast('Mesa excluída!', 'success'); closeModal(); loadMesas(); }
         else showToast(r.error, 'error');
     });
@@ -145,8 +145,8 @@ function abrirModalMesa(mesa = null) {
         if (!data.name) return showToast('Informe o nome da mesa.', 'error');
 
         const r = isEdit
-            ? await window.electronAPI.put(`/mesas/${mesa.id}/`, data)
-            : await window.electronAPI.post('/mesas/', data);
+            ? await window.electronAPI.put(`/mesas/${mesa.id}`, data)
+            : await window.electronAPI.post('/mesas', data);
 
         if (r.ok) { showToast(isEdit ? 'Mesa atualizada!' : 'Mesa criada!', 'success'); closeModal(); loadMesas(); }
         else showToast(r.error, 'error');

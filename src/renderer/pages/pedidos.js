@@ -2,12 +2,20 @@
 // Cada "order" representa um item individual na fila, com pipeline de status por timestamps
 
 const STATUS_CONFIG = {
-  'Em espera': { badge: 'badge-warning', icon: '⏳', next: 'preparing', nextLabel: '▶ Preparando' },
+  'Na fila': { badge: 'badge-warning', icon: '⏳', next: 'preparing', nextLabel: '▶ Preparando' },
   'Preparando': { badge: 'badge-info', icon: '🍳', next: 'finished', nextLabel: '✅ Pronto' },
   'Pronto': { badge: 'badge-success', icon: '✅', next: 'delivered', nextLabel: '🚀 Entregue' },
   'Entregue': { badge: 'badge-muted', icon: '🚀', next: null, nextLabel: null },
   'Cancelado': { badge: 'badge-danger', icon: '❌', next: null, nextLabel: null },
 };
+
+function getOrderStatus(o) {
+  if (o.canceled && o.canceled !== '0001-01-01T00:00:00Z') return 'Cancelado';
+  if (o.delivered && o.delivered !== '0001-01-01T00:00:00Z') return 'Entregue';
+  if (o.finished && o.finished !== '0001-01-01T00:00:00Z') return 'Pronto';
+  if (o.preparing && o.preparing !== '0001-01-01T00:00:00Z') return 'Preparando';
+  return 'Na fila';
+}
 
 export async function renderPedidos(container) {
   container.innerHTML = `
@@ -25,7 +33,7 @@ export async function renderPedidos(container) {
         <input type="text" class="search-input" id="search-order" placeholder="🔍 Buscar produto, comanda ou mesa..." />
         <select id="filter-status-order" class="form-control" style="width:160px">
           <option value="">Todos os status</option>
-          <option value="Em espera">⏳ Em espera</option>
+          <option value="Na fila">⏳ Na fila</option>
           <option value="Preparando">🍳 Preparando</option>
           <option value="Pronto">✅ Pronto</option>
           <option value="Entregue">🚀 Entregue</option>
@@ -43,19 +51,42 @@ export async function renderPedidos(container) {
 }
 
 let _ordersData = [];
+let _productsMap = {};
+let _comandasMap = {};
+let _mesasMap = {};
 
 async function loadOrders() {
   const wrap = document.getElementById('orders-table');
   if (!wrap) return;
   wrap.innerHTML = `<div class="loading-screen"><div class="spinner"></div></div>`;
-  const res = await window.electronAPI.get('/orders/');
+  
+  // Busca tudo em paralelo para resolver as referências (IDs)
+  const [res, pRes, cRes, mRes] = await Promise.all([
+    window.electronAPI.get('/orders'),
+    window.electronAPI.get('/products'),
+    window.electronAPI.get('/comandas'),
+    window.electronAPI.get('/mesas')
+  ]);
+
   if (!res.ok) { wrap.innerHTML = `<div class="table-empty">Erro ao carregar pedidos.</div>`; return; }
+  
+  // Constrói mapas para consulta rápida (IDs como string para segurança)
+  if (pRes.ok) _productsMap = pRes.data.reduce((acc, p) => { acc[String(p.id)] = p.name; return acc; }, {});
+  if (mRes.ok) _mesasMap = mRes.data.reduce((acc, m) => { acc[String(m.id)] = m.name; return acc; }, {});
+  if (cRes.ok) _comandasMap = cRes.data.reduce((acc, c) => {
+    acc[String(c.id)] = {
+      name: c.name || '–',
+      mesa: _mesasMap[String(c.mesa)] || `Mesa ${c.mesa}` || '–'
+    };
+    return acc;
+  }, {});
+
   _ordersData = res.data;
 
   // Por padrão, filtra para mostrar só os não entregues/cancelados
   const filtroInicial = document.getElementById('filter-status-order');
   if (filtroInicial && !filtroInicial.value) {
-    // Mantém filtro vazio mas é renderizado completo
+    // Mantém o filtro se necessário
   }
   renderOrdersTable(_ordersData);
 }
@@ -79,13 +110,19 @@ function renderOrdersTable(data) {
       </tr></thead>
       <tbody>
         ${data.map(o => {
-    const cfg = STATUS_CONFIG[o.status] || { badge: 'badge-muted', icon: '?', next: null };
+    const status = getOrderStatus(o);
+    const cfg = STATUS_CONFIG[status] || { badge: 'badge-muted', icon: '?', next: null };
+    
+    // Resolve nomes com base nos IDs
+    const prodName = _productsMap[String(o.id_product)] || o.product_name || `ID #${o.id_product}`;
+    const comandaInfo = _comandasMap[String(o.id_comanda)] || { name: `Comanda #${o.id_comanda}`, mesa: '–' };
+
     return `<tr>
             <td style="color:var(--text-muted)">#${o.id}</td>
-            <td><strong>${o.product_name || '–'}</strong></td>
-            <td style="font-size:0.82rem;color:var(--text-secondary)">${o.comanda_name || '–'}</td>
-            <td style="font-size:0.82rem">${o.mesa_name || '–'}</td>
-            <td><span class="badge ${cfg.badge}">${cfg.icon} ${o.status}</span></td>
+            <td><strong>${prodName}</strong></td>
+            <td style="font-size:0.82rem;color:var(--text-secondary)">${comandaInfo.name}</td>
+            <td style="font-size:0.82rem">${comandaInfo.mesa}</td>
+            <td><span class="badge ${cfg.badge}">${cfg.icon} ${status}</span></td>
             <td style="font-size:0.78rem;color:var(--text-muted);white-space:nowrap">${formatTime(o.queue)}</td>
             <td style="font-size:0.8rem;color:var(--text-secondary);max-width:140px;">
               <div style="display:flex;align-items:center;gap:4px">
@@ -107,9 +144,9 @@ function renderOrdersTable(data) {
     </table>
     <div style="padding:12px 20px;border-top:1px solid var(--border);font-size:0.8rem;color:var(--text-muted)">
       ${data.length} ${data.length === 1 ? 'pedido' : 'pedidos'} exibidos
-      &nbsp;·&nbsp; ⏳ ${data.filter(o => o.status === 'Em espera').length} em espera
-      &nbsp;·&nbsp; 🍳 ${data.filter(o => o.status === 'Preparando').length} preparando
-      &nbsp;·&nbsp; ✅ ${data.filter(o => o.status === 'Pronto').length} prontos
+      &nbsp;·&nbsp; ⏳ ${data.filter(o => getOrderStatus(o) === 'Na fila').length} na fila
+      &nbsp;·&nbsp; 🍳 ${data.filter(o => getOrderStatus(o) === 'Preparando').length} preparando
+      &nbsp;·&nbsp; ✅ ${data.filter(o => getOrderStatus(o) === 'Pronto').length} prontos
     </div>`;
 
   // Avançar status para próxima etapa
@@ -117,7 +154,7 @@ function renderOrdersTable(data) {
     btn.addEventListener('click', async () => {
       const nowISO = new Date().toISOString();
       const patch = { [btn.dataset.next]: nowISO };
-      const r = await window.electronAPI.patch(`/orders/${btn.dataset.id}/`, patch);
+      const r = await window.electronAPI.patch(`/orders/${btn.dataset.id}`, patch);
       if (r.ok) { showToast('Status atualizado!', 'success'); loadOrders(); }
       else showToast(r.error, 'error');
     })
@@ -126,7 +163,7 @@ function renderOrdersTable(data) {
   // Cancelar pedido
   wrap.querySelectorAll('.btn-cancela').forEach(btn =>
     btn.addEventListener('click', async () => {
-      const r = await window.electronAPI.patch(`/orders/${btn.dataset.id}/`, { canceled: new Date().toISOString() });
+      const r = await window.electronAPI.patch(`/orders/${btn.dataset.id}`, { canceled: new Date().toISOString() });
       if (r.ok) { showToast('Pedido cancelado.', 'info'); loadOrders(); }
       else showToast(r.error, 'error');
     })
@@ -144,7 +181,7 @@ function renderOrdersTable(data) {
       window.abrirModalObsCozinhaGlobal(productName, currentObs, async (novaObs) => {
         if (novaObs === null || novaObs === currentObs) return;
 
-        const r = await window.electronAPI.patch(`/orders/${orderId}/`, { obs: novaObs });
+        const r = await window.electronAPI.patch(`/orders/${orderId}`, { obs: novaObs });
         if (r.ok) {
           showToast('Observação atualizada!', 'success');
           loadOrders();
@@ -167,7 +204,7 @@ function filtrarOrders() {
       (o.comanda_name || '').toLowerCase().includes(q) ||
       (o.mesa_name || '').toLowerCase().includes(q) ||
       (o.obs || '').toLowerCase().includes(q);
-    const matchStatus = !status || o.status === status;
+    const matchStatus = !status || getOrderStatus(o) === status;
     return matchQ && matchStatus;
   });
   renderOrdersTable(filtered);

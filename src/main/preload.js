@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Config
     getConfigUrl: () => ipcRenderer.invoke('config:get-url'),
     setConfigUrl: (url) => ipcRenderer.invoke('config:set-url', url),
+    getPrintSilent: () => ipcRenderer.invoke('config:get-print-silent'),
+    setPrintSilent: (value) => ipcRenderer.invoke('config:set-print-silent', value),
+
+    // Print
+    printDirect: (html) => ipcRenderer.invoke('print:direct', html),
 
     // API CRUD
     get: (endpoint) => ipcRenderer.invoke('api:get', endpoint),

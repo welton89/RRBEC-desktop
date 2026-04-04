@@ -31,28 +31,63 @@ export async function renderClientes(container) {
 }
 
 let _clientesData = [];
+let _comandasData = [];
 let _productsMap = {};
+let _paymentTypes = [];
 
 async function loadClientes() {
   const wrap = document.getElementById('clientes-table');
   if (!wrap) return;
   wrap.innerHTML = `<div class="loading-screen"><div class="spinner"></div></div>`;
 
-  // Carrega clientes e produtos em paralelo para ter os preços
-  const [res, pRes] = await Promise.all([
-    window.electronAPI.get('/clients/'),
-    window.electronAPI.get('/products/')
+  // Carrega clientes, produtos, comandas e tipos de pagamento em paralelo
+  const [res, pRes, cRes, ptRes] = await Promise.all([
+    window.electronAPI.get('/clients'),
+    window.electronAPI.get('/products'),
+    window.electronAPI.get('/comandas'),
+    window.electronAPI.get('/payment-types')
   ]);
+
+  if (ptRes.ok) _paymentTypes = ptRes.data;
 
   if (pRes.ok) {
     _productsMap = pRes.data.reduce((acc, p) => {
-      acc[p.id] = parseFloat(p.price || 0);
+      acc[String(p.id)] = {
+        name: p.name,
+        price: parseFloat(p.price || 0)
+      };
       return acc;
     }, {});
   }
 
+  if (cRes.ok) _comandasData = cRes.data;
+
   if (!res.ok) { wrap.innerHTML = `<div class="table-empty">Erro ao carregar clientes.</div>`; return; }
-  _clientesData = res.data;
+  
+  _clientesData = res.data || [];
+  _comandasData = cRes.ok ? (cRes.data || []) : [];
+
+  // Calcula o débito real de cada cliente somando suas comandas FIADO
+  _clientesData.forEach(c => {
+    const fiados = _comandasData.filter(com => {
+      // Baseado no model Go: json:"client"
+      const cid = com.client; 
+      return String(cid) === String(c.id) && String(com.status).toUpperCase() === 'FIADO';
+    });
+    
+    c.real_debt = fiados.reduce((acc, com) => {
+      const totalComanda = (com.items || []).reduce((sum, item) => {
+        const pInfo = _productsMap[String(item.product)];
+        const preco = pInfo ? pInfo.price : parseFloat(item.product_price || 0);
+        return sum + preco;
+      }, 0);
+      return acc + totalComanda;
+    }, 0);
+  });
+
+  const comDebito = _clientesData.filter(c => c.real_debt > 0);
+  console.log(`[DEBUG_CLIENTS] Cálculo dinâmico finalizado. Sucesso p/ ${comDebito.length} clientes.`);
+  
   renderClientesTable(_clientesData);
 }
 
@@ -61,8 +96,8 @@ function renderClientesTable(data) {
   if (!wrap) return;
   if (!data.length) { wrap.innerHTML = `<div class="table-empty">Nenhum cliente encontrado.</div>`; return; }
 
-  // Ordena por maior débito por padrão
-  const sorted = [...data].sort((a, b) => parseFloat(b.debt || 0) - parseFloat(a.debt || 0));
+  // Ordena por maior débito por padrão usando o cálculo dinâmico
+  const sorted = [...data].sort((a, b) => (b.real_debt || 0) - (a.real_debt || 0));
 
   wrap.innerHTML = `
     <table>
@@ -70,20 +105,20 @@ function renderClientesTable(data) {
         <th>#</th>
         <th>Nome</th>
         <th>Contato</th>
-        <th>Débito</th>
+        <th style="color:var(--primary)">Débito Dinâmico</th>
         <th>Status</th>
         <th>Cadastrado em</th>
         <th>Ações</th>
       </tr></thead>
       <tbody>
         ${sorted.map(c => {
-    const debt = parseFloat(c.debt || 0);
+    const debt = c.real_debt || 0;
     return `<tr>
             <td style="color:var(--text-muted)">#${c.id}</td>
             <td><strong>${c.name}</strong></td>
             <td>${c.contact || '–'}</td>
             <td>
-              <span style="font-weight:600; color: ${debt > 0 ? 'var(--danger)' : 'var(--text-secondary)'}">
+              <span style="font-weight:700; font-size:1.05rem; color: ${debt > 0 ? 'var(--danger)' : 'var(--text-secondary)'}">
                 R$ ${debt.toFixed(2)}
               </span>
             </td>
@@ -95,7 +130,7 @@ function renderClientesTable(data) {
             <td style="font-size:0.82rem;color:var(--text-muted)">${formatDate(c.created_at)}</td>
             <td>
               <div style="display:flex;gap:6px">
-                <button class="btn btn-info btn-sm btn-hist-cli" data-id="${c.id}" title="Ver Fiados">📜</button>
+                <button class="btn btn-info btn-sm btn-hist-cli" data-id="${c.id}">📜 Ver Fiados</button>
                 <button class="btn btn-secondary btn-sm btn-edit-cli" data-id="${c.id}">Editar</button>
               </div>
             </td>
@@ -131,7 +166,7 @@ function filtrarClientes() {
       (c.contact || '').toLowerCase().includes(q) ||
       String(c.id).includes(q);
 
-    const debtValue = parseFloat(c.debt || 0);
+    const debtValue = c.real_debt || 0;
     const matchDebt = !debtFltr ||
       (debtFltr === 'has-debt' ? debtValue > 0 : debtValue === 0);
 
@@ -187,8 +222,8 @@ function abrirModalCliente(cliente = null) {
     if (!data.name) return showToast('Informe o nome do cliente.', 'error');
 
     const r = isEdit
-      ? await window.electronAPI.put(`/clients/${cliente.id}/`, data)
-      : await window.electronAPI.post('/clients/', data);
+      ? await window.electronAPI.put(`/clients/${cliente.id}`, data)
+      : await window.electronAPI.post('/clients', data);
 
     if (r.ok) { showToast(isEdit ? 'Cliente atualizado!' : 'Cliente criado!', 'success'); closeModal(); loadClientes(); }
     else showToast(r.error, 'error');
@@ -200,42 +235,64 @@ async function abrirHistoricoFiados(cliente) {
     title: `📜 Fiados: ${cliente.name}`,
     body: `
       <div id="fiados-modal-content">
-        <div id="fiados-list" class="loading-screen"><div class="spinner"></div></div>
+        <div id="fiados-list"></div>
         
-        <div id="fiados-summary" class="hidden" style="margin-top:20px; padding-top:15px; border-top:2px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <div style="font-size:0.85rem; color:var(--text-secondary)">Selecionados: <span id="selected-count">0</span></div>
-            <div style="font-size:1.2rem; font-weight:700; color:var(--success)">Total: R$ <span id="selected-total">0.00</span></div>
+        <div id="fiados-summary" class="hidden" style="margin-top:20px; padding-top:15px; border-top:2px solid var(--border); display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center">
+            <div>
+              <div style="font-size:0.85rem; color:var(--text-secondary)">Selecionados: <span id="selected-count">0</span></div>
+              <div style="font-size:1.2rem; font-weight:700; color:var(--success)">Total: R$ <span id="selected-total">0.00</span></div>
+            </div>
+            
+            <div style="width:200px">
+              <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700">Forma de Pagamento</label>
+              <select id="pay-select-type" class="form-control" style="margin-top:4px">
+                ${_paymentTypes.map(pt => `<option value="${pt.id}">${pt.nome || pt.name}</option>`).join('')}
+              </select>
+            </div>
           </div>
-          <button class="btn btn-primary btn-md" id="btn-pagar-selecionados" disabled>💳 Pagar Selecionados</button>
+          
+          <button class="btn btn-primary btn-md" id="btn-pagar-selecionados" disabled style="width:100%">💳 Pagar Selecionados</button>
         </div>
       </div>`,
     footer: `<button class="btn btn-secondary btn-md" onclick="closeModal()">Sair</button>`
   });
 
-  const res = await window.electronAPI.get(`/clients/${cliente.id}/fiados/`);
   const listContainer = document.getElementById('fiados-list');
   const summary = document.getElementById('fiados-summary');
   if (!listContainer) return;
 
-  if (!res.ok) {
-    listContainer.innerHTML = `<div class="table-empty">Erro ao carregar fiados: ${res.error}</div>`;
-    return;
-  }
+  console.log(`[DEBUG_FIADOS] Procurando fiados para cliente ${cliente.id} (${cliente.name})...`);
+  console.log(`[DEBUG_FIADOS] Total de comandas na memória: ${_comandasData.length}`);
 
-  const fiados = res.data;
+  // Filtra as comandas FIADO do cliente de forma robusta
+  const fiados = _comandasData.filter(com => {
+    const isFiado = String(com.status).toUpperCase() === 'FIADO';
+    const isMeuClient = String(com.client) === String(cliente.id); // Usando json:"client"
+    return isFiado && isMeuClient;
+  });
+
+  console.log(`[DEBUG_FIADOS] Encontradas:`, fiados);
+
   if (!fiados.length) {
-    listContainer.innerHTML = `<div class="table-empty">Nenhuma comanda pendente para este cliente.</div>`;
+    listContainer.innerHTML = `
+      <div class="table-empty">
+        Nenhuma comanda pendente para este cliente.<br/>
+        <small style="color:var(--text-muted)">Debug: ${_comandasData.length} comandas totais na memória</small>
+      </div>`;
     return;
   }
 
-  listContainer.classList.remove('loading-screen');
   listContainer.style.maxHeight = '400px';
   listContainer.style.overflowY = 'auto';
   summary.classList.remove('hidden');
 
   listContainer.innerHTML = fiados.map(f => {
-    const totalComanda = (f.items || []).reduce((acc, it) => acc + (_productsMap[it.product] || 0), 0);
+    const totalComanda = (f.items || []).reduce((acc, it) => {
+      const pInfo = _productsMap[String(it.product)];
+      const preco = pInfo ? pInfo.price : parseFloat(it.product_price || 0);
+      return acc + preco;
+    }, 0);
 
     return `
       <div class="card card-fiado" style="margin-bottom:15px; border-left: 4px solid var(--warning); position:relative; padding-left:50px">
@@ -245,7 +302,7 @@ async function abrirHistoricoFiados(cliente) {
         
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
           <div>
-            <div style="font-weight:600; font-size:1.1rem;">Comanda #${f.id} - ${f.name || 'Sem nome'}</div>
+            <div style="font-weight:600; font-size:1.1rem;">Comanda #${f.id} — ${f.name || 'Sem nome'}</div>
             <div style="font-size:0.8rem; color:var(--text-muted)">Abertura: ${formatDate(f.dt_open)}</div>
           </div>
           <div style="text-align:right">
@@ -254,25 +311,26 @@ async function abrirHistoricoFiados(cliente) {
           </div>
         </div>
         
-        <div style="font-size:0.85rem;">
-          <div style="margin-bottom:5px; color:var(--text-secondary)">Mesa: ${f.mesa_name || '–'} | Lançado por: ${f.user_name || '–'}</div>
-        </div>
-        
         <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:10px;">
           <details>
             <summary style="font-weight:600; font-size:0.8rem; text-transform:uppercase; color:var(--text-muted); cursor:pointer; outline:none">
               Ver Itens (${(f.items || []).length})
             </summary>
             <ul style="list-style:none; padding:10px 0 0 0; margin:0; font-size:0.85rem;">
-              ${(f.items || []).map(it => `
+              ${(f.items || []).map(it => {
+                const pInfo = _productsMap[String(it.product)];
+                const prodName = pInfo ? pInfo.name : (it.product_name || `Produto #${it.product}`);
+                const prodPreco = pInfo ? pInfo.price : parseFloat(it.product_price || 0);
+
+                return `
                 <li style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px dashed var(--border)">
-                  <span>• ${it.product_name}</span>
+                  <span>• ${prodName}</span>
                   <div style="text-align:right">
-                    <span>R$ ${(_productsMap[it.product] || 0).toFixed(2)}</span>
+                    <span>R$ ${prodPreco.toFixed(2)}</span>
                     <div style="font-size:0.7rem; color:var(--text-muted)">${formatDateShort(it.data_time)}</div>
                   </div>
                 </li>
-              `).join('')}
+              `}).join('')}
             </ul>
           </details>
         </div>
@@ -298,24 +356,45 @@ async function abrirHistoricoFiados(cliente) {
   });
 
   document.getElementById('btn-pagar-selecionados').addEventListener('click', async () => {
-    const selecionados = Array.from(listContainer.querySelectorAll('.fiado-check:checked')).map(c => parseInt(c.dataset.id));
+    const checks = Array.from(listContainer.querySelectorAll('.fiado-check:checked'));
+    const selecionados = checks.map(c => ({
+      id: parseInt(c.dataset.id),
+      total: parseFloat(c.dataset.total)
+    }));
+    
+    const payTypeId = parseInt(document.getElementById('pay-select-type').value);
     const totalPrompt = document.getElementById('selected-total').textContent;
 
-    if (confirm(`Deseja confirmar o pagamento de R$ ${totalPrompt} referente a ${selecionados.length} comanda(s)?`)) {
+    if (confirm(`Confirmar o recebimento de R$ ${totalPrompt} referente a ${selecionados.length} comanda(s)?`)) {
       const btn = document.getElementById('btn-pagar-selecionados');
       btn.disabled = true;
       btn.textContent = 'Processando...';
 
-      const r = await window.electronAPI.post('/clients/pagar_fiados/', { ids: selecionados });
+      let erros = 0;
+      for (const item of selecionados) {
+        // Encontra os detalhes da comanda para a descrição
+        const comanda = _comandasData.find(c => c.id === item.id);
+        const desc = `RECEBIMENTO FIADO — Comanda #${item.id} (${comanda?.name || '–'})`.trim();
+        
+        const payload = {
+          value: item.total,
+          type_pay: payTypeId,
+          client: parseInt(cliente.id),
+          description: desc,
+          status: 'CLOSED'
+        };
 
-      if (r.ok) {
-        showToast('Pagamento realizado com sucesso!', 'success');
+        const r = await window.electronAPI.post(`/comandas/${item.id}/pagar`, payload);
+        if (!r.ok) erros++;
+      }
+
+      if (erros === 0) {
+        showToast('Todos os pagamentos foram processados!', 'success');
         closeModal();
-        loadClientes(); // Recarrega a lista para atualizar os débitos
+        loadClientes();
       } else {
-        showToast(r.error || 'Erro ao processar pagamento.', 'error');
-        btn.disabled = false;
-        btn.textContent = '💳 Pagar Selecionados';
+        showToast(`Concluído com ${erros} erro(s). Verifique os recibos.`, 'warning');
+        loadClientes();
       }
     }
   });

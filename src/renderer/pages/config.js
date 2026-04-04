@@ -1,5 +1,6 @@
 export async function renderConfig(container) {
     const currentUrl = await window.electronAPI.getConfigUrl();
+    const printSilent = await window.electronAPI.getPrintSilent();
 
     container.innerHTML = `
     <div class="page-header">
@@ -26,6 +27,24 @@ export async function renderConfig(container) {
       </div>
     </div>
 
+    <div class="card" style="max-width: 600px; margin-top: 20px;">
+      <h3 style="margin-bottom: 20px; color: var(--text-primary);">🖨️ Impressão</h3>
+      
+      <div class="form-group">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="config-print-silent" ${printSilent ? 'checked' : ''} style="width: 18px; height: 18px;" />
+          <span><strong>Impressão direta (sem diálogo)</strong></span>
+        </label>
+        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">
+          Quando ativado, a impressão é enviada diretamente para a impressora padrão sem mostrar o diálogo do sistema.
+        </p>
+      </div>
+
+      <div style="margin-top: 15px; display: flex; gap: 10px;">
+        <button class="btn btn-primary btn-md" id="btn-save-print-config">💾 Salvar</button>
+      </div>
+    </div>
+
     <div class="card" style="max-width: 600px; margin-top: 20px; border-left: 4px solid var(--primary);">
       <h3 style="margin-bottom: 10px; color: var(--text-primary);">ℹ️ Sobre o Sistema</h3>
       <p style="color: var(--text-secondary); font-size: 0.85rem;">
@@ -36,7 +55,7 @@ export async function renderConfig(container) {
     </div>
   `;
 
-    // Salvar
+    // Salvar config de API
     document.getElementById('btn-save-config').addEventListener('click', async () => {
         const newUrl = document.getElementById('config-api-url').value.trim();
         if (!newUrl.startsWith('http')) {
@@ -51,11 +70,22 @@ export async function renderConfig(container) {
         }
     });
 
-    // Restaurar
+    // Restaurar URL
     document.getElementById('btn-reset-url').addEventListener('click', async () => {
         const defaultUrl = 'http://localhost:8000/api/v1';
         document.getElementById('config-api-url').value = defaultUrl;
         await window.electronAPI.setConfigUrl(defaultUrl);
         showToast('URL restaurada para o padrão localhost.', 'info');
+    });
+
+    // Salvar config de impressão
+    document.getElementById('btn-save-print-config').addEventListener('click', async () => {
+        const silent = document.getElementById('config-print-silent').checked;
+        const r = await window.electronAPI.setPrintSilent(silent);
+        if (r.ok) {
+            showToast(silent ? 'Impressão direta ativada!' : 'Impressão direta desativada.', 'success');
+        } else {
+            showToast('Erro ao salvar configuração.', 'error');
+        }
     });
 }

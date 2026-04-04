@@ -979,3 +979,80 @@ select.form-control option {
     color: var(--primary);
     font-weight: 600;
 }
+
+/* ─── Print Styles ────────────────────────────────────────────────────────── */
+@media print {
+    @page {
+        size: 80mm auto;
+        margin: 5mm;
+    }
+
+    body {
+        background: white !important;
+        color: black !important;
+        font-size: 12px;
+        margin: 0;
+        padding: 0;
+    }
+
+    body > *:not(.print-comanda) {
+        display: none !important;
+    }
+
+    .print-comanda {
+        display: block !important;
+        width: 100%;
+        max-width: 80mm;
+        background: white;
+        color: black;
+        font-family: 'Courier New', monospace;
+        font-size: 11px;
+        line-height: 1.3;
+    }
+
+    .print-comanda * {
+        color: black !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+
+    .print-header {
+        text-align: center;
+        border-bottom: 1px dashed #000;
+        padding-bottom: 8px;
+        margin-bottom: 10px;
+    }
+
+    .print-title {
+        font-size: 14px;
+        font-weight: bold;
+    }
+
+    .print-info {
+        margin: 4px 0;
+    }
+
+    .print-items {
+        border-bottom: 1px dashed #000;
+        padding-bottom: 8px;
+        margin-bottom: 8px;
+    }
+
+    .print-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 2px 0;
+    }
+
+    .print-totals {
+        font-weight: bold;
+    }
+
+    .print-footer {
+        text-align: center;
+        margin-top: 10px;
+        font-size: 10px;
+    }
+}

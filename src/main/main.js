@@ -6,7 +6,14 @@ const axios = require('axios');
 const store = new Store();
 
 function getBaseUrl() {
-  return store.get('api_url', 'http://localhost:8000/api/v1');
+  const currentUrl = store.get('api_url');
+  // Migração automática da URL antiga para o novo middleware local
+  if (!currentUrl || currentUrl.includes('squareweb.app')) {
+    const newUrl = 'http://localhost:8080/api/v1';
+    store.set('api_url', newUrl);
+    return newUrl;
+  }
+  return currentUrl;
 }
 
 // ─── Janela Principal ────────────────────────────────────────────────────────
@@ -31,89 +38,45 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-  mainWindow.webContents.openDevTools();
+  // mainWindow.webContents.openDevTools();
 }
 
-// ─── Helpers de Token ────────────────────────────────────────────────────────
-let isRefreshing = false;
-let refreshPromise = null;
+// ─── Helpers de Autenticação (Middleware Go) ──────────────────────────────────
 
 function getHeaders() {
-  const token = store.get('access_token');
-  // console.log('[MAIN] getHeaders - Token exists:', !!token);
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-async function refreshAccessToken() {
-  if (isRefreshing) {
-    console.log('[JWT] Refresh already in progress, waiting...');
-    return refreshPromise;
-  }
-
-  const refresh = store.get('refresh_token');
-  if (!refresh) {
-    console.error('[JWT] No refresh token available.');
-    throw new Error('No refresh token');
-  }
-
-  isRefreshing = true;
-  console.log('[JWT] Starting token refresh flow...');
-
-  refreshPromise = axios.post(`${getBaseUrl()}/token/refresh/`, { refresh })
-    .then(res => {
-      const { access, refresh: newRefresh } = res.data;
-      store.set('access_token', access);
-      if (newRefresh) {
-        store.set('refresh_token', newRefresh);
-        console.log('[JWT] Refresh token rotated and updated.');
-      }
-      console.log('[JWT] Access token updated successfully.');
-      return access;
-    })
-    .catch(err => {
-      console.error('[JWT] Refresh Failed:', err.response?.data || err.message);
-      // Limpa tudo se o refresh falhar (refresh_token expirou definitivamente)
-      store.delete('access_token');
-      store.delete('refresh_token');
-      store.delete('user');
-      throw err;
-    })
-    .finally(() => {
-      isRefreshing = false;
-      refreshPromise = null;
-    });
-
-  return refreshPromise;
+  const user = store.get('user');
+  return user && user.id ? { 'X-User-ID': String(user.id) } : {};
 }
 
 async function requestWithRetry(method, endpoint, data) {
-  const url = `${getBaseUrl()}${endpoint}`;
-  console.log(`[API] ${method.toUpperCase()} ${url}`);
+  const cleanEndpoint = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
+  const url = `${getBaseUrl()}${cleanEndpoint}`;
+  const headers = {
+    ...getHeaders(),
+    'Content-Type': 'application/json'
+  };
+  
+  console.log(`[DEBUG_API] >>> ${method.toUpperCase()} ${url}`);
+  console.log(`[DEBUG_API] >>> Headers:`, JSON.stringify(headers));
+  if (data) console.log(`[DEBUG_API] >>> Body:`, JSON.stringify(data));
 
   try {
-    const res = await axios({ method, url, data, headers: getHeaders() });
+    const res = await axios({ 
+      method, 
+      url, 
+      data, 
+      headers
+    });
     return { ok: true, data: res.data };
   } catch (err) {
     const status = err.response?.status;
-
-    // Se for 401 ou 403, tentamos o refresh uma única vez
-    if ((status === 401 || status === 403) && store.get('refresh_token')) {
-      console.warn(`[API] ${status} Unauthorized/Forbidden on ${endpoint}. Attempting refresh...`);
-      try {
-        await refreshAccessToken();
-        // Tenta a requisição original novamente com o novo header
-        const retryRes = await axios({ method, url, data, headers: getHeaders() });
-        console.log(`[API] Retry successful for ${endpoint}`);
-        return { ok: true, data: retryRes.data };
-      } catch (refreshErr) {
-        console.error(`[API] Retry failed after refresh for ${endpoint}`);
-        if (mainWindow) mainWindow.webContents.send('auth:expired');
-        return { ok: false, error: 'Sessão expirada. Faça login novamente.', expired: true };
-      }
-    }
-
     const msg = err.response?.data || err.message;
-    console.error(`[API ERROR] ${status || 'NET'} ${endpoint}:`, msg);
+    console.error(`[DEBUG_API] >>> ERROR ${status || 'NET'} on ${endpoint}:`, msg);
+
+    if (status === 401 || status === 403) {
+      if (mainWindow) mainWindow.webContents.send('auth:expired');
+      return { ok: false, error: 'Sessão expirada ou não autorizado.', expired: true };
+    }
     return { ok: false, error: typeof msg === 'object' ? JSON.stringify(msg) : msg };
   }
 }
@@ -121,29 +84,55 @@ async function requestWithRetry(method, endpoint, data) {
 // ─── IPC Handlers (Registrar IMEDIATAMENTE) ──────────────────────────────────
 ipcMain.handle('auth:login', async (_, { username, password }) => {
   try {
-    const res = await axios.post(`${getBaseUrl()}/token/`, { username, password });
-    console.log('[MAIN] Login Successful. User:', res.data.user?.username);
-    store.set('access_token', res.data.access);
-    store.set('refresh_token', res.data.refresh);
-    store.set('user', res.data.user);
+    const url = `${getBaseUrl()}/login`;
+    console.log(`[DEBUG_LOGIN] >>> Tentando login em: ${url}`);
+    
+    const res = await axios.post(url, { username, password }, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const userData = res.data;
+    console.log('[DEBUG_LOGIN] >>> Resposta Completa do Servidor:', JSON.stringify(userData));
+
+    // Busca o ID em qualquer lugar possível (id, user.id, user_id, UID, pk)
+    const userId = userData.id || 
+                   (userData.user && userData.user.id) || 
+                   userData.user_id || 
+                   userData.pk;
+    
+    console.log('[DEBUG_LOGIN] >>> ID Capturado:', userId);
+    
+    if (!userId) {
+      console.warn('[DEBUG_LOGIN] >>> AVISO: Não encontramos um ID numérico. Verifique a Resposta Completa acima.');
+    }
+
+    // Normaliza para garantir que user.id exista para o getHeaders()
+    if (!userData.id) userData.id = userId;
+    
+    store.set('user', userData);
+    store.delete('access_token');
+    store.delete('refresh_token');
+    
     return { ok: true };
   } catch (err) {
-    console.error('[MAIN] Login Failed:', err.response?.data || err.message);
-    return { ok: false, error: 'Credenciais inválidas.' };
+    console.error('[DEBUG_LOGIN] >>> Falha no Login:', err.response?.data || err.message);
+    return { ok: false, error: 'Erro de autenticação no servidor local.' };
   }
 });
 
 ipcMain.handle('auth:logout', () => {
+  store.delete('user');
   store.delete('access_token');
   store.delete('refresh_token');
-  store.delete('user');
   return { ok: true };
 });
 
-ipcMain.handle('auth:check', () => ({ authenticated: !!store.get('access_token') }));
+ipcMain.handle('auth:check', () => {
+  const user = store.get('user');
+  return { authenticated: !!(user && user.id) };
+});
 
 ipcMain.handle('auth:user', () => {
-  console.log('[MAIN] IPC auth:user requested.');
   return store.get('user');
 });
 
@@ -158,6 +147,38 @@ ipcMain.handle('config:set-url', (_, url) => {
   store.set('api_url', url);
   console.log('[MAIN] API URL updated to:', url);
   return { ok: true };
+});
+
+ipcMain.handle('config:get-print-silent', () => store.get('print_silent', false));
+ipcMain.handle('config:set-print-silent', (_, value) => {
+  store.set('print_silent', value);
+  console.log('[MAIN] Print silent mode:', value);
+  return { ok: true };
+});
+
+ipcMain.handle('print:direct', async (_, html) => {
+  const printSilent = store.get('print_silent', false);
+  try {
+    const win = new BrowserWindow({ show: false });
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    await new Promise(r => win.webContents.once('did-finish-load', r));
+    return new Promise((resolve) => {
+      win.webContents.print({
+        silent: printSilent,
+        printBackground: true,
+        deviceName: ''
+      }, (success, errorType) => {
+        win.close();
+        if (success) {
+          resolve({ ok: true });
+        } else {
+          resolve({ ok: false, error: 'Nenhuma impressora configurada ou disponível.' });
+        }
+      });
+    });
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 // ─── Lifecycle ──────────────────────────────────────────────────────────────

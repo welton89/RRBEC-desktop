@@ -1,7 +1,12 @@
 export async function renderProdutos(container) {
   let categorias = [];
-  const catRes = await window.electronAPI.get('/categories/');
+  let unidades = [];
+  const [catRes, unRes] = await Promise.all([
+    window.electronAPI.get('/categories'),
+    window.electronAPI.get('/unit-of-measurements')
+  ]);
   if (catRes.ok) categorias = catRes.data;
+  if (unRes.ok) unidades = unRes.data;
 
   container.innerHTML = `
     <div class="page-header">
@@ -10,7 +15,7 @@ export async function renderProdutos(container) {
         <div class="page-subtitle">Cardápio e categorias</div>
       </div>
       <div class="page-actions">
-        <button class="btn btn-secondary btn-md" id="btn-nova-cat">+ Categoria</button>
+        <button class="btn btn-secondary btn-md" id="btn-gerenciar-cat">📁 Categorias</button>
         <button class="btn btn-primary btn-md" id="btn-novo-prod">+ Produto</button>
       </div>
     </div>
@@ -30,28 +35,28 @@ export async function renderProdutos(container) {
       <div id="produtos-table"></div>
     </div>`;
 
-  await loadProdutos(categorias);
+  await loadProdutos(categorias, unidades);
 
-  document.getElementById('btn-novo-prod').addEventListener('click', () => abrirModalProduto(null, categorias));
-  document.getElementById('btn-nova-cat').addEventListener('click', () => abrirModalCategoria());
-  document.getElementById('search-produto').addEventListener('input', () => filtrarProdutos(categorias));
-  document.getElementById('filter-cat').addEventListener('change', () => filtrarProdutos(categorias));
-  document.getElementById('filter-ativo').addEventListener('change', () => filtrarProdutos(categorias));
+  document.getElementById('btn-novo-prod').addEventListener('click', () => abrirModalProduto(null, categorias, unidades));
+  document.getElementById('btn-gerenciar-cat').addEventListener('click', () => abrirModalGerenciarCategorias(categorias));
+  document.getElementById('search-produto').addEventListener('input', () => filtrarProdutos(categorias, unidades));
+  document.getElementById('filter-cat').addEventListener('change', () => filtrarProdutos(categorias, unidades));
+  document.getElementById('filter-ativo').addEventListener('change', () => filtrarProdutos(categorias, unidades));
 }
 
 let _produtosData = [];
 
-async function loadProdutos(categorias) {
+async function loadProdutos(categorias, unidades) {
   const wrap = document.getElementById('produtos-table');
   if (!wrap) return;
   wrap.innerHTML = `<div class="loading-screen"><div class="spinner"></div></div>`;
-  const res = await window.electronAPI.get('/products/');
+  const res = await window.electronAPI.get('/products');
   if (!res.ok) { wrap.innerHTML = `<div class="table-empty">Erro ao carregar produtos.</div>`; return; }
   _produtosData = res.data;
-  renderProdutosTable(_produtosData, categorias);
+  renderProdutosTable(_produtosData, categorias, unidades);
 }
 
-function renderProdutosTable(data, categorias) {
+function renderProdutosTable(data, categorias, unidades) {
   const wrap = document.getElementById('produtos-table');
   if (!wrap) return;
   if (!data.length) { wrap.innerHTML = `<div class="table-empty">Nenhum produto encontrado.</div>`; return; }
@@ -87,14 +92,16 @@ function renderProdutosTable(data, categorias) {
             </span>
           </td>
           <td>
-            <span class="badge ${p.active ? 'badge-success' : 'badge-danger'}">
+            <button class="badge ${p.active ? 'badge-success' : 'badge-danger'} btn-status-prod" 
+                    data-id="${p.id}" data-active="${p.active}" 
+                    style="cursor:pointer; border:none; outline:none; transition: transform 0.1s active"
+                    title="Clique para alterar status">
               ${p.active ? 'Ativo' : 'Inativo'}
-            </span>
+            </button>
           </td>
           <td>
             <div style="display:flex;gap:6px">
               <button class="btn btn-secondary btn-sm btn-edit-prod" data-id="${p.id}">Editar</button>
-              <button class="btn btn-danger btn-sm btn-del-prod" data-id="${p.id}">Excluir</button>
             </div>
           </td>
         </tr>`).join('')}
@@ -103,21 +110,27 @@ function renderProdutosTable(data, categorias) {
 
   wrap.querySelectorAll('.btn-edit-prod').forEach(btn => {
     btn.addEventListener('click', () => {
-      const p = _produtosData.find(x => x.id === parseInt(btn.dataset.id));
-      if (p) abrirModalProduto(p, categorias);
+      const p = _produtosData.find(x => String(x.id) === String(btn.dataset.id));
+      if (p) abrirModalProduto(p, categorias, unidades);
     });
   });
 
-  wrap.querySelectorAll('.btn-del-prod').forEach(btn =>
+  wrap.querySelectorAll('.btn-status-prod').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const r = await window.electronAPI.delete(`/products/${btn.dataset.id}/`);
-      if (r.ok) { showToast('Produto excluído!', 'success'); loadProdutos(categorias); }
-      else showToast(r.error, 'error');
-    })
-  );
+      const id = btn.dataset.id;
+      const currentActive = btn.dataset.active === 'true';
+      const r = await window.electronAPI.patch(`/products/${id}`, { active: !currentActive });
+      if (r.ok) {
+        showToast(`Produto ${!currentActive ? 'ativado' : 'inativado'}!`, 'success');
+        loadProdutos(categorias, unidades);
+      } else {
+        showToast(r.error, 'error');
+      }
+    });
+  });
 }
 
-function filtrarProdutos(categorias) {
+function filtrarProdutos(categorias, unidades) {
   const q = document.getElementById('search-produto')?.value.toLowerCase() || '';
   const catId = parseInt(document.getElementById('filter-cat')?.value) || null;
   const ativo = document.getElementById('filter-ativo')?.value;
@@ -128,10 +141,10 @@ function filtrarProdutos(categorias) {
     const matchAtiv = !ativo || String(p.active) === ativo;
     return matchQ && matchCat && matchAtiv;
   });
-  renderProdutosTable(filtered, categorias);
+  renderProdutosTable(filtered, categorias, unidades);
 }
 
-function abrirModalProduto(produto, categorias) {
+function abrirModalProduto(produto, categorias, unidades) {
   const isEdit = !!produto;
   openModal({
     title: isEdit ? `Editar: ${produto.name}` : 'Novo Produto',
@@ -157,6 +170,13 @@ function abrirModalProduto(produto, categorias) {
           </select>
         </div>
         <div class="form-group">
+          <label>Unidade de Medida</label>
+          <select id="prod-unit" class="form-control">
+            <option value="">– Selecione –</option>
+            ${unidades.map(u => `<option value="${u.id}" ${produto?.unit_of_measure === u.id ? 'selected' : ''}>${u.acronym || u.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
           <label>Ativo</label>
           <select id="prod-ativo" class="form-control">
             <option value="true"  ${produto?.active !== false ? 'selected' : ''}>Sim</option>
@@ -175,52 +195,168 @@ function abrirModalProduto(produto, categorias) {
           <input type="text" id="prod-desc" class="form-control" value="${produto?.description || ''}" placeholder="Descrição opcional" />
         </div>
         <div class="form-group" style="grid-column:1/-1">
-          <label>Imagem</label>
-          <input type="file" id="prod-img" accept="image/*" class="form-control" />
+          <label>URL da Imagem</label>
+          <input type="text" id="prod-img" class="form-control" value="${produto?.image || ''}" placeholder="http://..." />
         </div>
       </div>`,
     footer: `
       <button class="btn btn-secondary btn-md" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary btn-md" id="btn-salvar-prod">${isEdit ? 'Salvar' : 'Criar'}</button>`,
+      <button class="btn btn-primary btn-md" id="btn-salvar-prod">${isEdit ? 'Salvar Alterações' : 'Criar Produto'}</button>`,
   });
 
   document.getElementById('btn-salvar-prod').addEventListener('click', async () => {
-    const catVal = parseInt(document.getElementById('prod-cat').value) || null;
+    const btn = document.getElementById('btn-salvar-prod');
+    btn.disabled = true;
+    btn.textContent = 'Processando...';
+
+    const catVal = parseInt(document.getElementById('prod-cat').value);
+    const unitVal = parseInt(document.getElementById('prod-unit').value);
+
+    // Constrói o payload enviando apenas o que é necessário/preenchido
     const data = {
-      name: document.getElementById('prod-nome').value,
-      description: document.getElementById('prod-desc').value,
-      //image: document.getElementById('prod-img').value,
+      name: document.getElementById('prod-nome').value.trim(),
+      description: document.getElementById('prod-desc').value.trim(),
       price: parseFloat(document.getElementById('prod-preco').value) || 0,
       quantity: parseInt(document.getElementById('prod-qty').value) || 0,
-      category: catVal,
       active: document.getElementById('prod-ativo').value === 'true',
       cuisine: document.getElementById('prod-cuisine').value === 'true',
+      image: document.getElementById('prod-img').value.trim(),
     };
+
+    if (catVal) data.category = catVal;
+    if (unitVal) data.unit_of_measure = unitVal;
+
+    if (!data.name) {
+      btn.disabled = false;
+      btn.textContent = isEdit ? 'Salvar Alterações' : 'Criar Produto';
+      return showToast('O nome do produto é obrigatório.', 'warning');
+    }
+
     const r = isEdit
-      ? await window.electronAPI.put(`/products/${produto.id}/`, data)
-      : await window.electronAPI.post('/products/', data);
-    if (r.ok) { showToast(isEdit ? 'Produto atualizado!' : 'Produto criado!', 'success'); closeModal(); loadProdutos(categorias); }
-    else showToast(r.error, 'error');
+      ? await window.electronAPI.patch(`/products/${produto.id}`, data)
+      : await window.electronAPI.post('/products', data);
+
+    if (r.ok) {
+      showToast(isEdit ? 'Produto atualizado!' : 'Produto criado!', 'success');
+      closeModal();
+      loadProdutos(categorias, unidades);
+    } else {
+      showToast(r.error, 'error');
+      btn.disabled = false;
+      btn.textContent = isEdit ? 'Salvar Alterações' : 'Criar Produto';
+    }
   });
 }
 
-function abrirModalCategoria() {
+// ─── Modal Gerenciar Categorias ──────────────────────────────────────────────
+async function abrirModalGerenciarCategorias(categoriasArr) {
+  let categorias = Array.isArray(categoriasArr) ? categoriasArr : [];
+
+  const updateTable = () => {
+    const listWrap = document.getElementById('cat-list-items');
+    if (!listWrap) return;
+    listWrap.innerHTML = categorias.map(c => `
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid var(--border)">
+        <span style="${!c.active ? 'text-decoration:line-through; color:var(--text-muted)' : ''}">
+          ${c.nome || c.name} ${!c.active ? '(Inativa)' : ''}
+        </span>
+        <button class="btn btn-ghost btn-sm btn-edit-cat" data-id="${c.id}" title="Editar Categoria">✏️</button>
+      </div>`).join('');
+
+    listWrap.querySelectorAll('.btn-edit-cat').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cat = categorias.find(x => String(x.id) === String(btn.dataset.id));
+        if (cat) abrirFormularioCategoria(cat, updateTable, async (novasCats) => {
+          categorias = novasCats;
+          updateTable();
+        });
+      });
+    });
+  };
+
   openModal({
-    title: 'Nova Categoria',
+    title: '📁 Gerenciar Categorias',
     body: `
-      <div class="form-group">
-        <label>Nome</label>
-        <input type="text" id="cat-nome" class="form-control" placeholder="Ex: Bebidas, Lanches..." />
+      <div style="margin-bottom:20px">
+        <button class="btn btn-primary btn-sm" id="btn-cat-add-new">+ Adicionar Nova</button>
+      </div>
+      <div id="cat-list-items" style="max-height:400px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius-sm)">
+        <div class="table-empty">Limpando...</div>
+      </div>`,
+    footer: `<button class="btn btn-secondary btn-md" onclick="closeModal()">Fechar</button>`,
+  });
+
+  updateTable();
+
+  document.getElementById('btn-cat-add-new').addEventListener('click', () => {
+    abrirFormularioCategoria(null, updateTable, async (novasCats) => {
+      categorias = novasCats;
+      updateTable();
+    });
+  });
+}
+
+// Abre formulário pequeno para criar ou editar uma única categoria
+function abrirFormularioCategoria(cat, onSuccess, onListUpdate) {
+  const isEdit = !!cat;
+
+  // Criamos uma mini modal ou sobrepomos a atual com uma de confirmação simples de formulário
+  // Para simplicidade, vamos usar o openModal mesmo (ele sobrepõe)
+  openModal({
+    title: isEdit ? `Editar Categoria: ${cat.nome || cat.name}` : 'Nova Categoria',
+    body: `
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Nome da Categoria</label>
+          <input type="text" id="cat-field-name" class="form-control" value="${isEdit ? (cat.nome || cat.name) : ''}" placeholder="Ex: Bebidas, Sobremesas..." />
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select id="cat-field-active" class="form-control">
+            <option value="true" ${cat?.active !== false ? 'selected' : ''}>Ativa</option>
+            <option value="false" ${cat?.active === false ? 'selected' : ''}>Inativa</option>
+          </select>
+        </div>
       </div>`,
     footer: `
-      <button class="btn btn-secondary btn-md" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary btn-md" id="btn-criar-cat">Criar</button>`,
+      <button class="btn btn-secondary btn-md" id="btn-cat-form-cancel">Voltar</button>
+      <button class="btn btn-primary btn-md" id="btn-cat-form-save">${isEdit ? 'Salvar Alterações' : 'Criar Categoria'}</button>`,
   });
-  document.getElementById('btn-criar-cat').addEventListener('click', async () => {
-    const nome = document.getElementById('cat-nome').value.trim();
-    if (!nome) return showToast('Informe um nome.', 'error');
-    const r = await window.electronAPI.post('/categories/', { nome, name: nome });
-    if (r.ok) { showToast('Categoria criada!', 'success'); closeModal(); }
-    else showToast(r.error, 'error');
+
+  document.getElementById('btn-cat-form-cancel').onclick = () => {
+    closeModal();
+    // Reabre o gerenciador
+    setTimeout(() => {
+      // Recarregar categorias para garantir sync
+      window.electronAPI.get('/categories').then(res => {
+        if (res.ok) onListUpdate(res.data);
+      });
+    }, 300);
+  };
+
+  document.getElementById('btn-cat-form-save').addEventListener('click', async () => {
+    const nome = document.getElementById('cat-field-name').value.trim();
+    const active = document.getElementById('cat-field-active').value === 'true';
+
+    if (!nome) return showToast('O nome é obrigatório.', 'warning');
+
+    const data = { name: nome, active: active };
+    const r = isEdit
+      ? await window.electronAPI.patch(`/categories/${cat.id}`, { name: nome }) // Use PATCH as requested
+      : await window.electronAPI.post('/categories', data);
+
+    if (r.ok) {
+      showToast(isEdit ? 'Categoria atualizada!' : 'Categoria criada!', 'success');
+      const res = await window.electronAPI.get('/categories');
+      if (res.ok) {
+        onListUpdate(res.data);
+        closeModal();
+        // Não reabre o gerenciador imediatamente para dar tempo do toast sumir, 
+        // mas aqui vamos reabrir para manter o fluxo
+        setTimeout(() => abrirModalGerenciarCategorias(res.data), 300);
+      }
+    } else {
+      showToast(r.error, 'error');
+    }
   });
 }

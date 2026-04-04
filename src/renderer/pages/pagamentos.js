@@ -1,12 +1,11 @@
 export async function renderPagamentos(container) {
   // Carrega tipos de pagamento para o formulário de novo registro
-  let tiposPag = [], comandas = [];
   const [tRes, cRes] = await Promise.all([
-    window.electronAPI.get('/payment-types/'),
-    window.electronAPI.get('/comandas/'),
+    window.electronAPI.get('/payment-types'),
+    window.electronAPI.get('/comandas'),
   ]);
-  if (tRes.ok) tiposPag = tRes.data;
-  if (cRes.ok) comandas = cRes.data;
+  const tiposPag = tRes.ok ? tRes.data : [];
+  const comandas = cRes.ok ? cRes.data : [];
 
   container.innerHTML = `
     <div class="page-header">
@@ -42,13 +41,22 @@ async function loadPagamentos(tiposPag, comandas) {
   const wrap = document.getElementById('pagamentos-table');
   if (!wrap) return;
   wrap.innerHTML = `<div class="loading-screen"><div class="spinner"></div></div>`;
-  const res = await window.electronAPI.get('/payments/');
+  const res = await window.electronAPI.get('/payments');
   if (!res.ok) { wrap.innerHTML = `<div class="table-empty">Erro ao carregar pagamentos.</div>`; return; }
-  _pagsData = res.data;
-  renderPagsTable(_pagsData);
+  
+  // Ordena decrescente (mais novos primeiro)
+  _pagsData = (res.data || []).sort((a, b) => b.id - a.id);
+  
+  // Cria mapa de comandas para consulta rápida
+  const cmdMap = (comandas || []).reduce((acc, c) => {
+    acc[String(c.id)] = `${c.name || 'Sem nome'} (${c.mesa_name || `Mesa ${c.mesa}`})`;
+    return acc;
+  }, {});
+
+  renderPagsTable(_pagsData, cmdMap);
 }
 
-function renderPagsTable(data) {
+function renderPagsTable(data, cmdMap = {}) {
   const wrap = document.getElementById('pagamentos-table');
   if (!wrap) return;
 
@@ -73,25 +81,29 @@ function renderPagsTable(data) {
         <th>Ações</th>
       </tr></thead>
       <tbody>
-        ${data.map(p => `<tr>
-          <td style="color:var(--text-muted)">#${p.id}</td>
-          <td>${p.client_name || '–'}</td>
-          <td>
-            ${p.comanda ? `<span style="font-size:0.8rem">
-              <span style="color:var(--text-muted)">#${p.comanda}</span>
-              ${p.comanda_name ? `<span style="color:var(--text-secondary)"> ${p.comanda_name}</span>` : ''}
-            </span>` : '–'}
-          </td>
-          <td><span class="badge badge-info">${p.type_pay_name || '–'}</span></td>
-          <td><strong style="color:var(--success)">R$ ${parseFloat(p.value || 0).toFixed(2)}</strong></td>
-          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:0.82rem">
-            ${p.description || '–'}
-          </td>
-          <td style="white-space:nowrap;font-size:0.82rem">${formatDate(p.datetime)}</td>
-          <td>
-            <button class="btn btn-danger btn-sm btn-del-pag" data-id="${p.id}">Excluir</button>
-          </td>
-        </tr>`).join('')}
+        ${data.map(p => {
+          const cDesc = cmdMap[String(p.comanda)] || p.comanda_name || '–';
+          return `
+            <tr>
+              <td style="color:var(--text-muted)">#${p.id}</td>
+              <td>${p.client_name || '–'}</td>
+              <td>
+                ${p.comanda ? `<span style="font-size:0.8rem">
+                  <span style="color:var(--text-muted)">#${p.comanda}</span>
+                  <span style="color:var(--text-secondary)"> ${cDesc}</span>
+                </span>` : '–'}
+              </td>
+              <td><span class="badge badge-info">${p.type_pay_name || '–'}</span></td>
+              <td><strong style="color:var(--success)">R$ ${parseFloat(p.value || 0).toFixed(2)}</strong></td>
+              <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:0.82rem">
+                ${p.description || '–'}
+              </td>
+              <td style="white-space:nowrap;font-size:0.82rem">${formatDate(p.datetime)}</td>
+              <td>
+                <button class="btn btn-danger btn-sm btn-del-pag" data-id="${p.id}">Excluir</button>
+              </td>
+            </tr>`;
+        }).join('')}
       </tbody>
     </table>
     <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;align-items:center;gap:8px">
@@ -101,7 +113,7 @@ function renderPagsTable(data) {
 
   wrap.querySelectorAll('.btn-del-pag').forEach(btn =>
     btn.addEventListener('click', async () => {
-      const r = await window.electronAPI.delete(`/payments/${btn.dataset.id}/`);
+      const r = await window.electronAPI.delete(`/payments/${btn.dataset.id}`);
       if (r.ok) { showToast('Pagamento excluído!', 'success'); loadPagamentos([], []); }
       else showToast(r.error, 'error');
     })
@@ -172,7 +184,7 @@ function abrirModalPagamento(tiposPag, comandas) {
       description: document.getElementById('pag-desc').value.trim(),
     };
 
-    const r = await window.electronAPI.post('/payments/', data);
+    const r = await window.electronAPI.post('/payments', data);
     if (r.ok) { showToast('Pagamento registrado!', 'success'); closeModal(); loadPagamentos(tiposPag, comandas); }
     else showToast(r.error, 'error');
   });
