@@ -54,6 +54,7 @@ let _ordersData = [];
 let _productsMap = {};
 let _comandasMap = {};
 let _mesasMap = {};
+let _productsFullMap = {};
 
 async function loadOrders() {
   const wrap = document.getElementById('orders-table');
@@ -70,13 +71,17 @@ async function loadOrders() {
 
   if (!res.ok) { wrap.innerHTML = `<div class="table-empty">Erro ao carregar pedidos.</div>`; return; }
   
-  // Constrói mapas para consulta rápida (IDs como string para segurança)
-  if (pRes.ok) _productsMap = pRes.data.reduce((acc, p) => { acc[String(p.id)] = p.name; return acc; }, {});
+  if (pRes.ok) {
+    _productsMap = pRes.data.reduce((acc, p) => { acc[String(p.id)] = p.name; return acc; }, {});
+    _productsFullMap = pRes.data.reduce((acc, p) => { acc[String(p.id)] = p; return acc; }, {});
+  }
   if (mRes.ok) _mesasMap = mRes.data.reduce((acc, m) => { acc[String(m.id)] = m.name; return acc; }, {});
   if (cRes.ok) _comandasMap = cRes.data.reduce((acc, c) => {
     acc[String(c.id)] = {
+      id: c.id,
       name: c.name || '–',
-      mesa: _mesasMap[String(c.mesa)] || `Mesa ${c.mesa}` || '–'
+      mesa: _mesasMap[String(c.mesa)] || `Mesa ${c.mesa}` || '–',
+      mesa_name: c.mesa_name || _mesasMap[String(c.mesa)] || '–'
     };
     return acc;
   }, {});
@@ -132,6 +137,7 @@ function renderOrdersTable(data) {
             </td>
             <td>
               <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="btn btn-secondary btn-sm btn-reprint" data-id="${o.id}" title="Reimprimir Ticket">🖨️</button>
                 ${cfg.next ? `<button class="btn btn-success btn-sm btn-avanca" data-id="${o.id}" data-next="${cfg.next}">${cfg.nextLabel}</button>` : ''}
                 ${o.status !== 'Cancelado' && o.status !== 'Entregue'
         ? `<button class="btn btn-danger btn-sm btn-cancela" data-id="${o.id}">✕</button>`
@@ -166,6 +172,92 @@ function renderOrdersTable(data) {
       const r = await window.electronAPI.patch(`/orders/${btn.dataset.id}`, { canceled: new Date().toISOString() });
       if (r.ok) { showToast('Pedido cancelado.', 'info'); loadOrders(); }
       else showToast(r.error, 'error');
+    })
+  );
+
+  // Reimprimir ticket de cozinha
+  wrap.querySelectorAll('.btn-reprint').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const orderId = btn.dataset.id;
+      const order = _ordersData.find(o => String(o.id) === String(orderId));
+      if (!order) return showToast('Pedido não encontrado.', 'error');
+      
+      const comanda = _comandasMap[String(order.id_comanda)];
+      const product = _productsFullMap[String(order.id_product)];
+      
+      const dataAtual = new Date().toLocaleString('pt-BR');
+      const nomeEstabelecimento = 'RRBEC - Bar & Restaurante';
+      const nomeProduto = product?.name || order.product_name || `Produto #${order.id_product}`;
+      const obs = order.obs || '';
+      const usuario = order.applicant || 'Sistema';
+      const nomeComanda = comanda?.name || `Comanda #${comanda?.id || order.id_comanda}`;
+      const nomeMesa = comanda?.mesa_name || comanda?.mesa || '–';
+
+      const htmlTicket = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Ticket Cozinha - ${nomeComanda}</title>
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { font-family: 'Courier New', monospace; font-size: 13px; padding: 8px; width: 80mm; }
+            .ticket { display: block; color: black; }
+            .ticket * { color: black !important; background: transparent !important; }
+            .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 8px; }
+            .title { font-size: 16px; font-weight: bold; text-transform: uppercase; }
+            .subtitle { font-size: 12px; margin-top: 4px; }
+            .info { margin: 4px 0; font-size: 12px; }
+            .info strong { font-size: 14px; }
+            .product { font-size: 18px; font-weight: bold; text-align: center; margin: 12px 0; padding: 8px; border: 3px double #000; text-transform: uppercase; }
+            .obs { font-style: italic; font-size: 11px; text-align: center; margin-top: 8px; padding: 6px; border: 1px dashed #000; }
+            .footer { text-align: center; font-size: 10px; margin-top: 8px; color: #666; }
+            @media print { @page { size: 80mm auto; margin: 0; } }
+          </style>
+        </head>
+        <body>
+          <div class="ticket">
+            <div class="header">
+              <div class="title">🍳 COZINHA - REIMPRESSÃO</div>
+              <div class="subtitle">${nomeEstabelecimento}</div>
+            </div>
+            
+            <div class="info" style="text-align:center">
+              <strong>${nomeComanda}</strong>
+            </div>
+            <div class="info" style="display:flex;justify-content:space-between">
+              <span>Mesa: ${nomeMesa}</span>
+              <span>${dataAtual}</span>
+            </div>
+            
+            <div class="product">${nomeProduto}</div>
+            
+            ${obs ? `<div class="obs">OBS: ${obs}</div>` : ''}
+            
+            <div class="footer">
+              Atendido por: ${usuario}
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      window.electronAPI.printDirect(htmlTicket).then(r => {
+        if (r.ok) {
+          showToast('Ticket reimpresso!', 'success');
+        } else if (r.error === 'NO_PRINTER') {
+          showToast('⚠️ Nenhuma impressora configurada. Configure uma impressora nas configurações do sistema.', 'warning', 5000);
+          const printWindow = window.open('', '', 'width=300,height=400');
+          printWindow.document.write(htmlTicket);
+          printWindow.document.close();
+          setTimeout(() => printWindow.print(), 300);
+        } else {
+          const printWindow = window.open('', '', 'width=300,height=400');
+          printWindow.document.write(htmlTicket);
+          printWindow.document.close();
+          setTimeout(() => printWindow.print(), 300);
+        }
+      });
     })
   );
 

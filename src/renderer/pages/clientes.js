@@ -34,18 +34,19 @@ let _clientesData = [];
 let _comandasData = [];
 let _productsMap = {};
 let _paymentTypes = [];
+let _paymentsMap = {};
 
 async function loadClientes() {
   const wrap = document.getElementById('clientes-table');
   if (!wrap) return;
   wrap.innerHTML = `<div class="loading-screen"><div class="spinner"></div></div>`;
 
-  // Carrega clientes, produtos, comandas e tipos de pagamento em paralelo
-  const [res, pRes, cRes, ptRes] = await Promise.all([
+  const [res, pRes, cRes, ptRes, pagsRes] = await Promise.all([
     window.electronAPI.get('/clients'),
     window.electronAPI.get('/products'),
     window.electronAPI.get('/comandas'),
-    window.electronAPI.get('/payment-types')
+    window.electronAPI.get('/payment-types'),
+    window.electronAPI.get('/payments')
   ]);
 
   if (ptRes.ok) _paymentTypes = ptRes.data;
@@ -60,17 +61,24 @@ async function loadClientes() {
     }, {});
   }
 
-  if (cRes.ok) _comandasData = cRes.data;
+  _comandasData = cRes.ok ? (cRes.data || []) : [];
+
+  _paymentsMap = {};
+  if (pagsRes.ok) {
+    (pagsRes.data || []).forEach(p => {
+      if (p.comanda) {
+        if (!_paymentsMap[p.comanda]) _paymentsMap[p.comanda] = [];
+        _paymentsMap[p.comanda].push(p);
+      }
+    });
+  }
 
   if (!res.ok) { wrap.innerHTML = `<div class="table-empty">Erro ao carregar clientes.</div>`; return; }
   
   _clientesData = res.data || [];
-  _comandasData = cRes.ok ? (cRes.data || []) : [];
 
-  // Calcula o débito real de cada cliente somando suas comandas FIADO
   _clientesData.forEach(c => {
     const fiados = _comandasData.filter(com => {
-      // Baseado no model Go: json:"client"
       const cid = com.client; 
       return String(cid) === String(c.id) && String(com.status).toUpperCase() === 'FIADO';
     });
@@ -81,7 +89,10 @@ async function loadClientes() {
         const preco = pInfo ? pInfo.price : parseFloat(item.product_price || 0);
         return sum + preco;
       }, 0);
-      return acc + totalComanda;
+      const pagamentos = _paymentsMap[com.id] || [];
+      const totalPago = pagamentos.reduce((sum, p) => sum + parseFloat(p.value || 0), 0);
+      const restante = Math.max(0, totalComanda - totalPago);
+      return acc + restante;
     }, 0);
   });
 
@@ -293,21 +304,27 @@ async function abrirHistoricoFiados(cliente) {
       const preco = pInfo ? pInfo.price : parseFloat(it.product_price || 0);
       return acc + preco;
     }, 0);
+    const pagamentos = _paymentsMap[f.id] || [];
+    const totalPago = pagamentos.reduce((acc, p) => acc + parseFloat(p.value || 0), 0);
+    const valorRestante = Math.max(0, totalComanda - totalPago);
+    const temPagamentos = pagamentos.length > 0;
 
     return `
-      <div class="card card-fiado" style="margin-bottom:15px; border-left: 4px solid var(--warning); position:relative; padding-left:50px">
+      <div class="card card-fiado" style="margin-bottom:15px; border-left: 4px solid ${valorRestante > 0 ? 'var(--warning)' : 'var(--success)'}; position:relative; padding-left:50px">
         <div style="position:absolute; left:15px; top:50%; transform:translateY(-50%)">
-          <input type="checkbox" class="fiado-check" data-id="${f.id}" data-total="${totalComanda}" style="width:20px; height:20px; cursor:pointer" />
+          <input type="checkbox" class="fiado-check" data-id="${f.id}" data-total="${valorRestante}" style="width:20px; height:20px; cursor:pointer" ${valorRestante <= 0 ? 'disabled' : ''} />
         </div>
         
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
           <div>
             <div style="font-weight:600; font-size:1.1rem;">Comanda #${f.id} — ${f.name || 'Sem nome'}</div>
             <div style="font-size:0.8rem; color:var(--text-muted)">Abertura: ${formatDate(f.dt_open)}</div>
+            ${temPagamentos ? `<div style="font-size:0.75rem; color:var(--success); margin-top:2px">Pago: R$ ${totalPago.toFixed(2)}</div>` : ''}
           </div>
           <div style="text-align:right">
+            ${temPagamentos ? `<div style="font-size:0.85rem; text-decoration:line-through; color:var(--text-muted)">R$ ${totalComanda.toFixed(2)}</div>` : ''}
             <div class="badge badge-warning" style="margin-bottom:5px">${f.status}</div>
-            <div style="font-weight:700; color:var(--danger); font-size:1.1rem">R$ ${totalComanda.toFixed(2)}</div>
+            <div style="font-weight:700; color:${valorRestante > 0 ? 'var(--warning)' : 'var(--success)'}; font-size:1.1rem">R$ ${valorRestante.toFixed(2)}</div>
           </div>
         </div>
         
@@ -333,6 +350,24 @@ async function abrirHistoricoFiados(cliente) {
               `}).join('')}
             </ul>
           </details>
+          ${temPagamentos ? `
+          <details style="margin-top:10px">
+            <summary style="font-weight:600; font-size:0.8rem; text-transform:uppercase; color:var(--success); cursor:pointer; outline:none">
+              Ver Pagamentos (${pagamentos.length})
+            </summary>
+            <ul style="list-style:none; padding:10px 0 0 0; margin:0; font-size:0.85rem;">
+              ${pagamentos.map(p => {
+                const tipoNome = _paymentTypes.find(t => String(t.id) === String(p.type_pay))?.name || 
+                                 _paymentTypes.find(t => String(t.id) === String(p.type_pay))?.nome || '–';
+                return `
+                <li style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px dashed var(--border); color:var(--success)">
+                  <span>💰 ${tipoNome}</span>
+                  <span>R$ ${parseFloat(p.value || 0).toFixed(2)}</span>
+                </li>
+              `}).join('')}
+            </ul>
+          </details>
+          ` : ''}
         </div>
       </div>
     `;
@@ -342,13 +377,17 @@ async function abrirHistoricoFiados(cliente) {
   const updateSum = () => {
     const checks = listContainer.querySelectorAll('.fiado-check:checked');
     let sum = 0;
-    checks.forEach(c => sum += parseFloat(c.dataset.total));
+    let count = 0;
+    checks.forEach(c => {
+      sum += parseFloat(c.dataset.total);
+      count++;
+    });
 
-    document.getElementById('selected-count').textContent = checks.length;
+    document.getElementById('selected-count').textContent = count;
     document.getElementById('selected-total').textContent = sum.toFixed(2);
 
     const btnPagar = document.getElementById('btn-pagar-selecionados');
-    btnPagar.disabled = checks.length === 0;
+    btnPagar.disabled = count === 0 || sum <= 0;
   };
 
   listContainer.querySelectorAll('.fiado-check').forEach(chk => {

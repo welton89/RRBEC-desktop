@@ -172,7 +172,12 @@ ipcMain.handle('print:direct', async (_, html) => {
         if (success) {
           resolve({ ok: true });
         } else {
-          resolve({ ok: false, error: 'Nenhuma impressora configurada ou disponível.' });
+          const errorMsg = errorType || '';
+          if (errorMsg.includes('No printer') || errorMsg.includes('failed to enumerate') || errorMsg.includes('Error getting default')) {
+            resolve({ ok: false, error: 'NO_PRINTER', message: 'Nenhuma impressora configurada. Configure uma impressora nas configurações do sistema.' });
+          } else {
+            resolve({ ok: false, error: errorMsg });
+          }
         }
       });
     });

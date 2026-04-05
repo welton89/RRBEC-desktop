@@ -146,10 +146,21 @@ function filtrarProdutos(categorias, unidades) {
 
 function abrirModalProduto(produto, categorias, unidades) {
   const isEdit = !!produto;
+  const imagemAtual = produto?.image || '';
+
   openModal({
     title: isEdit ? `Editar: ${produto.name}` : 'Novo Produto',
     body: `
       <div class="form-grid">
+        <div class="form-group" style="grid-column:1/-1; text-align:center">
+          <div id="prod-img-preview" style="width:120px;height:120px;border-radius:var(--radius-sm);border:2px dashed var(--border);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--bg-elevated);cursor:pointer">
+            ${imagemAtual ? `<img src="${imagemAtual}" style="max-width:100%;max-height:100%;object-fit:cover" />` : '<span style="font-size:2rem;color:var(--text-muted)">📷</span>'}
+          </div>
+          <input type="file" id="prod-img-file" accept="image/*" style="display:none" />
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-select-img">Selecionar Imagem</button>
+          ${imagemAtual ? '<button type="button" class="btn btn-ghost btn-sm" id="btn-remove-img" style="color:var(--danger)">Remover</button>' : ''}
+          <input type="hidden" id="prod-img" value="${imagemAtual}" />
+        </div>
         <div class="form-group" style="grid-column:1/-1">
           <label>Nome</label>
           <input type="text" id="prod-nome" class="form-control" value="${produto?.name || ''}" placeholder="Nome do produto" />
@@ -194,15 +205,42 @@ function abrirModalProduto(produto, categorias, unidades) {
           <label>Descrição</label>
           <input type="text" id="prod-desc" class="form-control" value="${produto?.description || ''}" placeholder="Descrição opcional" />
         </div>
-        <div class="form-group" style="grid-column:1/-1">
-          <label>URL da Imagem</label>
-          <input type="text" id="prod-img" class="form-control" value="${produto?.image || ''}" placeholder="http://..." />
-        </div>
       </div>`,
     footer: `
       <button class="btn btn-secondary btn-md" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary btn-md" id="btn-salvar-prod">${isEdit ? 'Salvar Alterações' : 'Criar Produto'}</button>`,
   });
+
+  const previewEl = document.getElementById('prod-img-preview');
+  const fileInput = document.getElementById('prod-img-file');
+  const imgInput = document.getElementById('prod-img');
+
+  previewEl.addEventListener('click', () => fileInput.click());
+  document.getElementById('btn-select-img').addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('Imagem muito grande. Máximo 5MB.', 'warning');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target.result;
+      imgInput.value = base64;
+      previewEl.innerHTML = `<img src="${base64}" style="max-width:100%;max-height:100%;object-fit:cover" />`;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const btnRemoveImg = document.getElementById('btn-remove-img');
+  if (btnRemoveImg) {
+    btnRemoveImg.addEventListener('click', () => {
+      imgInput.value = '';
+      previewEl.innerHTML = '<span style="font-size:2rem;color:var(--text-muted)">📷</span>';
+    });
+  }
 
   document.getElementById('btn-salvar-prod').addEventListener('click', async () => {
     const btn = document.getElementById('btn-salvar-prod');
@@ -212,7 +250,6 @@ function abrirModalProduto(produto, categorias, unidades) {
     const catVal = parseInt(document.getElementById('prod-cat').value);
     const unitVal = parseInt(document.getElementById('prod-unit').value);
 
-    // Constrói o payload enviando apenas o que é necessário/preenchido
     const data = {
       name: document.getElementById('prod-nome').value.trim(),
       description: document.getElementById('prod-desc').value.trim(),
@@ -220,8 +257,10 @@ function abrirModalProduto(produto, categorias, unidades) {
       quantity: parseInt(document.getElementById('prod-qty').value) || 0,
       active: document.getElementById('prod-ativo').value === 'true',
       cuisine: document.getElementById('prod-cuisine').value === 'true',
-      image: document.getElementById('prod-img').value.trim(),
     };
+
+    const imgValue = document.getElementById('prod-img').value.trim();
+    if (imgValue) data.image = imgValue;
 
     if (catVal) data.category = catVal;
     if (unitVal) data.unit_of_measure = unitVal;

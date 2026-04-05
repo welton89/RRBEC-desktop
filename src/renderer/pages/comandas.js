@@ -108,14 +108,111 @@ function imprimirComanda(comanda, pagamentosComanda, totalComanda) {
   window.electronAPI.printDirect(htmlCompleto).then(r => {
     if (r.ok) {
       showToast('Impressão enviada!', 'success');
-    } else {
-      showToast('Nenhuma impressora configurada. Abrindo diálogo...', 'warning');
+    } else if (r.error === 'NO_PRINTER') {
+      showToast('⚠️ Nenhuma impressora configurada. Configure uma impressora nas configurações do sistema.', 'warning', 5000);
       const printWindow = window.open('', '', 'width=300,height=600');
       printWindow.document.write(htmlCompleto);
       printWindow.document.close();
-      printWindow.onload = () => printWindow.print();
+      setTimeout(() => printWindow.print(), 300);
+    } else {
+      const printWindow = window.open('', '', 'width=300,height=600');
+      printWindow.document.write(htmlCompleto);
+      printWindow.document.close();
+      setTimeout(() => printWindow.print(), 300);
     }
   });
+}
+
+function imprimirTicketCozinha(comanda, item, product, obs = '', loggedUser = null) {
+  const dataAtual = new Date().toLocaleString('pt-BR');
+  const nomeEstabelecimento = 'RRBEC - Bar & Restaurante';
+  const nomeProduto = product?.name || item.product_name || `Produto #${item.product}`;
+  const observacao = obs || item.obs || '';
+  const usuario = loggedUser?.username || item.applicant || 'Sistema';
+  const nomeComanda = comanda.name || `Comanda #${comanda.id}`;
+  const nomeMesa = comanda.mesa_name || comanda.mesa || '–';
+
+  const htmlTicket = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>Ticket Cozinha - ${nomeComanda}</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Courier New', monospace; font-size: 13px; padding: 8px; width: 80mm; }
+        .ticket { display: block; color: black; }
+        .ticket * { color: black !important; background: transparent !important; }
+        .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 8px; }
+        .title { font-size: 16px; font-weight: bold; text-transform: uppercase; }
+        .subtitle { font-size: 12px; margin-top: 4px; }
+        .info { margin: 4px 0; font-size: 12px; }
+        .info strong { font-size: 14px; }
+        .product { font-size: 18px; font-weight: bold; text-align: center; margin: 12px 0; padding: 8px; border: 3px double #000; text-transform: uppercase; }
+        .obs { font-style: italic; font-size: 11px; text-align: center; margin-top: 8px; padding: 6px; border: 1px dashed #000; }
+        .footer { text-align: center; font-size: 10px; margin-top: 8px; color: #666; }
+        @media print {
+          @page { size: 80mm auto; margin: 0; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="ticket">
+        <div class="header">
+          <div class="title">🍳 COZINHA</div>
+          <div class="subtitle">${nomeEstabelecimento}</div>
+        </div>
+        
+        <div class="info" style="text-align:center">
+          <strong>${nomeComanda}</strong>
+        </div>
+        <div class="info" style="display:flex;justify-content:space-between">
+          <span>Mesa: ${nomeMesa}</span>
+          <span>${dataAtual}</span>
+        </div>
+        
+        <div class="product">
+          ${nomeProduto}
+        </div>
+        
+        ${observacao ? `<div class="obs">OBS: ${observacao}</div>` : ''}
+        
+        <div class="footer">
+          Atendido por: ${usuario}
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  window.electronAPI.printDirect(htmlTicket).then(r => {
+    if (r.ok) {
+      // OK
+    } else if (r.error === 'NO_PRINTER') {
+      showToast('⚠️ Nenhuma impressora configurada. Abra as configurações do sistema para adicionar uma.', 'warning', 5000);
+      const printWindow = window.open('', '', 'width=300,height=400');
+      printWindow.document.write(htmlTicket);
+      printWindow.document.close();
+      setTimeout(() => printWindow.print(), 300);
+    } else {
+      const printWindow = window.open('', '', 'width=300,height=400');
+      printWindow.document.write(htmlTicket);
+      printWindow.document.close();
+      setTimeout(() => printWindow.print(), 300);
+    }
+  });
+}
+
+function getImageUrl(imagePath) {
+  if (!imagePath) return null;
+  if (imagePath.startsWith('data:')) return imagePath;
+  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) return imagePath;
+  return `http://localhost:8080${imagePath}`;
+}
+
+function getProductImage(product) {
+  const img = getImageUrl(product.image);
+  return img || 'https://wallpapers.com/images/featured/fundo-abstrato-escuro-27kvn4ewpldsngbu.jpg';
 }
 
 export async function renderComandas(container) {
@@ -471,9 +568,11 @@ async function abrirItensComanda(comandaIdOrObj) {
   const ativa = comanda.status === 'OPEN' || comanda.status === 'PAYING';
   const podeAdd = comanda.status === 'OPEN';
 
-
-  // Carrega produtos (ativos)
-  const pRes = await window.electronAPI.get('/products');
+  // Carrega produtos (ativos) e usuário logado
+  const [pRes, loggedUser] = await Promise.all([
+    window.electronAPI.get('/products'),
+    window.electronAPI.getUser()
+  ]);
   let todosProdutos = pRes.ok ? pRes.data.filter(p => p.active) : [];
 
   openModal({
@@ -497,7 +596,7 @@ async function abrirItensComanda(comandaIdOrObj) {
         </div>
       </div>`,
     footer: `
-      <button class="btn btn-secondary btn-md" id="btn-pdv-imprimir">🖨️ Imprimir</button>
+      <button class="btn btn-secondary btn-md" id="btn-pdv-imprimir">🖨️ Imprimir Comanda</button>
       <button class="btn btn-secondary btn-md" onclick="closeModal()">Sair do PDV</button>
     `,
   });
@@ -531,7 +630,7 @@ async function abrirItensComanda(comandaIdOrObj) {
             <thead><tr style="color:var(--text-muted);border-bottom:1px solid var(--border)">
               <th style="text-align:left;padding:8px 0">Produto</th>
               <th style="text-align:right;padding:8px 0">Preço</th>
-              ${podeAdd ? '<th style="text-align:center;padding:8px 0">Ação</th>' : ''}
+              <th style="text-align:center;padding:8px 0">Ações</th>
             </tr></thead>
             <tbody>
               ${itens.map(it => {
@@ -542,24 +641,29 @@ async function abrirItensComanda(comandaIdOrObj) {
       return `
                 <tr data-item-id="${it.id}">
                   <td style="padding:10px 0;border-bottom:1px solid var(--border)" ${tooltip}>
-                    ${prod?.name || it.product_name || `Produto #${it.product}`}
+                    ${isCuisine ? '🍳 ' : ''}${prod?.name || it.product_name || `Produto #${it.product}`}
+                    ${it.obs ? `<br><small style="color:var(--text-muted);font-size:0.75rem">OBS: ${it.obs}</small>` : ''}
                   </td>
                   <td style="padding:10px 0;text-align:right;border-bottom:1px solid var(--border)">
                     R$ ${(_productsMap[String(it.product)] || 0).toFixed(2)}
                   </td>
-                  ${podeAdd ? `
                   <td style="padding:10px 0;text-align:center;border-bottom:1px solid var(--border)">
                     <div style="display:flex; gap:8px; justify-content:center">
                       ${isCuisine ? `
-                        <button class="btn btn-ghost btn-sm btn-edit-obs" data-id="${it.id}" title="Editar observação" style="color: var(--primary); font-size: 1rem;">
+                        <button class="btn btn-ghost btn-sm btn-reprint-cozinha" data-id="${it.id}" title="Reimprimir Ticket" style="color: var(--warning); font-size: 0.9rem;">
+                          🖨️
+                        </button>
+                        <button class="btn btn-ghost btn-sm btn-edit-obs" data-id="${it.id}" title="Editar observação" style="color: var(--primary); font-size: 0.9rem;">
                           📝
                         </button>
                       ` : ''}
-                      <button class="btn btn-ghost btn-sm btn-del-item" data-id="${it.id}" title="Excluir item" style="color: var(--danger); font-size: 1rem;">
-                        🗑️
-                      </button>
+                      ${podeAdd ? `
+                        <button class="btn btn-ghost btn-sm btn-del-item" data-id="${it.id}" title="Excluir item" style="color: var(--danger); font-size: 0.9rem;">
+                          🗑️
+                        </button>
+                      ` : ''}
                     </div>
-                  </td>` : ''}
+                  </td>
                 </tr>`;
     }).join('')}
             </tbody>
@@ -631,6 +735,19 @@ async function abrirItensComanda(comandaIdOrObj) {
           } else {
             showToast(r.error, 'error');
           }
+        }
+      });
+    });
+
+    // Listeners de reimpressão de ticket de cozinha
+    container.querySelectorAll('.btn-reprint-cozinha').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const itemId = String(btn.dataset.id);
+        const item = comanda.items.find(it => String(it.id) === itemId);
+        const prod = todosProdutos.find(p => String(p.id) === String(item?.product));
+
+        if (item && prod) {
+          imprimirTicketCozinha(comanda, item, prod, item.obs, loggedUser);
         }
       });
     });
@@ -707,31 +824,33 @@ async function abrirItensComanda(comandaIdOrObj) {
     }
   };
 
-  const processarResultadoAdd = async (r, prod, obs = '') => {
+  const processarResultadoAdd = async (r, prod, obs = '', loggedUser = null) => {
     if (r.ok) {
       if (!comanda.items) comanda.items = [];
 
       const novoItem = r.data;
-      // Normaliza o campo product caso o servidor retorne product_id
       if (!novoItem.product && novoItem.product_id) novoItem.product = novoItem.product_id;
 
       comanda.items.push(novoItem);
       renderLeft();
       loadComandas(_mesasRef);
 
-      // Se o produto for de cozinha, cria a order na nova rota
       if (prod && prod.cuisine) {
         const orderPayload = {
-          productComanda: novoItem.id, // ID do item vinculado
+          productComanda: novoItem.id,
           id_product: prod.id,
           id_comanda: comanda.id,
-          obs: obs || novoItem.obs || ''
+          obs: obs || novoItem.obs || '',
+          applicant: loggedUser?.username || 'Sistema'
         };
 
         console.log('[PDV] Criando pedido na cozinha:', orderPayload);
         const orderRes = await window.electronAPI.post('/orders', orderPayload);
         if (orderRes.ok) {
           showToast('Pedido enviado para a cozinha!', 'success');
+          setTimeout(() => {
+            imprimirTicketCozinha(comanda, novoItem, prod, obs, loggedUser);
+          }, 300);
         } else {
           showToast('Item adicionado, mas falhou ao enviar para cozinha.', 'warning');
         }
@@ -763,7 +882,7 @@ async function abrirItensComanda(comandaIdOrObj) {
               obs: obs,
               applicant: loggedUser?.username || 'Sistema'
             });
-            processarResultadoAdd(r, prod, obs);
+            processarResultadoAdd(r, prod, obs, loggedUser);
           });
         } else {
           const loggedUser = await window.electronAPI.getUser();
@@ -786,7 +905,7 @@ async function abrirItensComanda(comandaIdOrObj) {
 
     // console.log('Produtos carregados no PDV:', todosProdutos);
     container.innerHTML = filtrados.map(p => {
-      const imgTarget = p.image ? `url('${p.image}')` : `url('https://wallpapers.com/images/featured/fundo-abstrato-escuro-27kvn4ewpldsngbu.jpg')`;
+      const imgTarget = `url('${getProductImage(p)}')`;
       return `
         <div class="pdv-product-card" data-id="${p.id}">
           <div class="pdv-product-bg" style="background-image: ${imgTarget}"></div>
