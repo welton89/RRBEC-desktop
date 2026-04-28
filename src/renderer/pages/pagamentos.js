@@ -26,6 +26,22 @@ export async function renderPagamentos(container) {
           ${tiposPag.map(t => `<option value="${t.id}">${t.nome || t.name}</option>`).join('')}
         </select>
       </div>
+      <div class="table-toolbar" style="border-top:1px solid var(--border);margin-top:0;padding-top:12px">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <div style="display:flex;gap:8px;align-items:center">
+            <label style="font-size:0.8rem;color:var(--text-muted)">De:</label>
+            <input type="datetime-local" id="filter-dataini" class="form-control" style="width:180px" />
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <label style="font-size:0.8rem;color:var(--text-muted)">Até:</label>
+            <input type="datetime-local" id="filter-datafim" class="form-control" style="width:180px" />
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-limpar-filtro-data">🗑️ Limpar</button>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-warning btn-md" id="btn-imprimir-relatorio">🖨️ Imprimir Cupom</button>
+        </div>
+      </div>
       <div id="pagamentos-table"></div>
     </div>`;
 
@@ -34,6 +50,14 @@ export async function renderPagamentos(container) {
   document.getElementById('btn-novo-pag').addEventListener('click', () => abrirModalPagamento(tiposPag, comandas));
   document.getElementById('search-pag').addEventListener('input', () => filtrarPagamentos());
   document.getElementById('filter-tipo').addEventListener('change', () => filtrarPagamentos());
+  document.getElementById('filter-dataini').addEventListener('change', () => filtrarPagamentos());
+  document.getElementById('filter-datafim').addEventListener('change', () => filtrarPagamentos());
+  document.getElementById('btn-limpar-filtro-data').addEventListener('click', () => {
+    document.getElementById('filter-dataini').value = '';
+    document.getElementById('filter-datafim').value = '';
+    filtrarPagamentos();
+  });
+  document.getElementById('btn-imprimir-relatorio').addEventListener('click', () => imprimirRelatorio());
 }
 
 let _pagsData = [];
@@ -72,159 +96,12 @@ async function loadPagamentos(tiposPag, comandas, clientes) {
     }, {});
   }
 
-  renderPagsTable();
+  window._pagsFiltered = _pagsData;
+renderPagsTableFiltered(_pagsData);
 }
 
-function renderPagsTable() {
+function renderPagsTableFiltered(filtered) {
   const wrap = document.getElementById('pagamentos-table');
-  if (!wrap) return;
-
-  if (!_pagsData.length) {
-    wrap.innerHTML = `<div class="table-empty">Nenhum pagamento registrado.</div>`;
-    return;
-  }
-
-  const total = _pagsData.reduce((acc, p) => acc + parseFloat(p.value || 0), 0);
-
-  wrap.innerHTML = `
-    <table>
-      <thead><tr>
-        <th>#</th>
-        <th>Cliente</th>
-        <th>Comanda</th>
-        <th>Tipo</th>
-        <th>Valor</th>
-        <th>Descrição</th>
-        <th>Data</th>
-        <th>Ações</th>
-      </tr></thead>
-      <tbody>
-        ${_pagsData.map(p => {
-          const cInfo = _cmdMap[String(p.comanda)];
-          const clienteNome = _clientesMap[String(p.client)] || p.client_name || '–';
-          const cDesc = cInfo ? `${cInfo.name} (${cInfo.mesa})` : (p.comanda_name || '–');
-          return `
-            <tr>
-              <td style="color:var(--text-muted)">#${p.id}</td>
-              <td>${clienteNome}</td>
-              <td>
-                ${p.comanda ? `<span style="font-size:0.8rem">
-                  <span style="color:var(--text-muted)">#${p.comanda}</span>
-                  <span style="color:var(--text-secondary)"> ${cDesc}</span>
-                </span>` : '–'}
-              </td>
-              <td><span class="badge badge-info">${p.type_pay_name || '–'}</span></td>
-              <td><strong style="color:var(--success)">R$ ${parseFloat(p.value || 0).toFixed(2)}</strong></td>
-              <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:0.82rem">
-                ${p.description || '–'}
-              </td>
-              <td style="white-space:nowrap;font-size:0.82rem">${formatDate(p.datetime)}</td>
-              <td>
-                <button class="btn btn-secondary btn-sm btn-view-pag" data-id="${p.id}">🔍 Ver</button>
-              </td>
-            </tr>`;
-        }).join('')}
-      </tbody>
-    </table>
-    <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;align-items:center;gap:8px">
-      <span style="font-size:0.82rem;color:var(--text-secondary)">Total exibido:</span>
-      <strong style="color:var(--success);font-size:1rem">R$ ${total.toFixed(2)}</strong>
-    </div>`;
-
-  wrap.querySelectorAll('.btn-view-pag').forEach(btn =>
-    btn.addEventListener('click', () => {
-      const pag = _pagsData.find(p => String(p.id) === String(btn.dataset.id));
-      if (pag) abrirDetalhesPagamento(pag);
-    })
-  );
-}
-
-function abrirDetalhesPagamento(pagamento) {
-  const cInfo = _cmdMap[String(pagamento.comanda)];
-  const tipoNome = _tiposPag.find(t => String(t.id) === String(pagamento.type_pay))?.name || 
-                   _tiposPag.find(t => String(t.id) === String(pagamento.type_pay))?.nome || 
-                   pagamento.type_pay_name || '–';
-  const clienteNome = _clientesMap[String(pagamento.client)] || pagamento.client_name || '–';
-
-  openModal({
-    title: `💳 Detalhes do Pagamento #${pagamento.id}`,
-    body: `
-      <div style="display:flex;flex-direction:column;gap:16px">
-        <div class="card" style="padding:16px;background:var(--bg-elevated)">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-            <div>
-              <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Valor</div>
-              <div style="font-size:1.5rem;font-weight:700;color:var(--success)">R$ ${parseFloat(pagamento.value || 0).toFixed(2)}</div>
-            </div>
-            <div>
-              <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Forma de Pagamento</div>
-              <div style="font-size:1rem;font-weight:600">${tipoNome}</div>
-            </div>
-          </div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div>
-            <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Cliente</div>
-            <div style="font-weight:500">${clienteNome}</div>
-          </div>
-          <div>
-            <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Data/Hora</div>
-            <div style="font-weight:500">${formatDate(pagamento.datetime)}</div>
-          </div>
-        </div>
-
-        ${pagamento.comanda ? `
-        <div>
-          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Comanda</div>
-          <div class="card" style="padding:12px;background:var(--bg-elevated)">
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-              <div>
-                <div style="font-weight:600">#${pagamento.comanda} — ${cInfo?.name || '–'}</div>
-                <div style="font-size:0.8rem;color:var(--text-secondary)">${cInfo?.mesa || '–'}</div>
-              </div>
-              <span class="badge badge-${cInfo?.status === 'FIADO' ? 'warning' : cInfo?.status === 'CLOSED' ? 'success' : 'info'}">
-                ${cInfo?.status || '–'}
-              </span>
-            </div>
-            ${cInfo?.dt_open ? `
-            <div style="font-size:0.8rem;color:var(--text-muted)">
-              Abertura: ${formatDate(cInfo.dt_open)}
-            </div>
-            ` : ''}
-          </div>
-        </div>
-        ` : ''}
-
-        ${pagamento.description ? `
-        <div>
-          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Descrição</div>
-          <div style="padding:10px;background:var(--bg-elevated);border-radius:var(--radius-sm)">${pagamento.description}</div>
-        </div>
-        ` : ''}
-      </div>
-    `,
-    footer: `<button class="btn btn-secondary btn-md" onclick="closeModal()">Fechar</button>`
-  });
-}
-
-function filtrarPagamentos() {
-  const q = document.getElementById('search-pag')?.value.toLowerCase() || '';
-  const tipo = parseInt(document.getElementById('filter-tipo')?.value) || null;
-
-  const filtered = _pagsData.filter(p => {
-    const clienteNome = _clientesMap[String(p.client)] || p.client_name || '';
-    const cInfo = _cmdMap[String(p.comanda)];
-    const comandaNome = cInfo?.name || p.comanda_name || '';
-    const matchQ = !q ||
-      clienteNome.toLowerCase().includes(q) ||
-      comandaNome.toLowerCase().includes(q) ||
-      (p.description || '').toLowerCase().includes(q) ||
-      String(p.id).includes(q);
-    const matchTipo = !tipo || p.type_pay === tipo;
-    return matchQ && matchTipo;
-  });
-
   const wrap = document.getElementById('pagamentos-table');
   if (!wrap) return;
 
@@ -286,6 +163,102 @@ function filtrarPagamentos() {
       if (pag) abrirDetalhesPagamento(pag);
     })
   );
+}
+
+function imprimirRelatorio() {
+  const filtered = window._pagsFiltered || _pagsData;
+  if (!filtered.length) return showToast('Nenhum pagamento para imprimir.', 'warning');
+
+  const dataIni = document.getElementById('filter-dataini')?.value;
+  const dataFim = document.getElementById('filter-datafim')?.value;
+  
+  const dataIniStr = dataIni ? new Date(dataIni).toLocaleString('pt-BR') : 'Início';
+  const dataFimStr = dataFim ? new Date(dataFim).toLocaleString('pt-BR') : 'Agora';
+
+  const porTipo = {};
+  filtered.forEach(p => {
+    const tipoNome = p.type_pay_name || _tiposPag.find(t => String(t.id) === String(p.type_pay))?.nome || _tiposPag.find(t => String(t.id) === String(p.type_pay))?.name || 'Outro';
+    if (!porTipo[tipoNome]) porTipo[tipoNome] = 0;
+    porTipo[tipoNome] += parseFloat(p.value || 0);
+  });
+
+  const totalGeral = filtered.reduce((acc, p) => acc + parseFloat(p.value || 0), 0);
+
+  const htmlRelatorio = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>Relatório de Pagamentos</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Courier New', monospace; font-size: 12px; padding: 10px; width: 80mm; }
+        .rel { display: block; }
+        .rel * { color: black !important; background: transparent !important; }
+        .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
+        .title { font-size: 16px; font-weight: bold; text-transform: uppercase; }
+        .periodo { font-size: 11px; margin-top: 4px; }
+        .section { margin-top: 16px; }
+        .section-title { font-size: 13px; font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 4px; margin-bottom: 8px; }
+        .row { display: flex; justify-content: space-between; padding: 3px 0; }
+        .total { font-weight: bold; margin-top: 8px; border-top: 2px solid #000; padding-top: 8px; }
+        .footer { text-align: center; margin-top: 16px; font-size: 10px; }
+        @media print {
+          @page { size: 80mm auto; margin: 0; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="rel">
+        <div class="header">
+          <div class="title">RRBEC - Bar & Restaurante</div>
+          <div class="periodo">Relatório de Pagamentos</div>
+          <div class="periodo">${dataIniStr} - ${dataFimStr}</div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">RESUMO POR TIPO</div>
+          ${Object.entries(porTipo).map(([tipo, valor]) => `
+            <div class="row">
+              <span>${tipo}</span>
+              <span>R$ ${valor.toFixed(2)}</span>
+            </div>
+          `).join('')}
+        </div>
+        
+        <div class="total">
+          <div class="row">
+            <span>TOTAL GERAL:</span>
+            <span>R$ ${totalGeral.toFixed(2)}</span>
+          </div>
+        </div>
+        
+        <div class="footer">
+          <div>------------------------</div>
+          <div>${filtered.length} pagamento(s)</div>
+          <div>Gerado em: ${new Date().toLocaleString('pt-BR')}</div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  window.electronAPI.printDirect(htmlRelatorio).then(r => {
+    if (r.ok) {
+      showToast('Relatório enviado para impressão!', 'success');
+    } else if (r.error === 'NO_PRINTER') {
+      showToast('Nenhuma impressora configurada.', 'warning', 5000);
+      const printWindow = window.open('', '', 'width=300,height=400');
+      printWindow.document.write(htmlRelatorio);
+      printWindow.document.close();
+      setTimeout(() => printWindow.print(), 300);
+    } else {
+      const printWindow = window.open('', '', 'width=300,height=400');
+      printWindow.document.write(htmlRelatorio);
+      printWindow.document.close();
+      setTimeout(() => printWindow.print(), 300);
+    }
+  });
 }
 
 function abrirModalPagamento(tiposPag, comandas) {
