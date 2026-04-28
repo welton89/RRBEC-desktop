@@ -11,12 +11,14 @@ import { renderClientes } from './pages/clientes.js';
 import { renderPagamentos } from './pages/pagamentos.js';
 import { renderLogin } from './pages/login.js';
 import { renderConfig } from './pages/config.js';
+import { renderPdv } from './pages/pdv.js';
 
 // ─── Roteador ────────────────────────────────────────────────────────────────
 const PAGES = {
     dashboard: renderDashboard,
     mesas: renderMesas,
     comandas: renderComandas,
+    pdv: renderPdv,
     pedidos: renderPedidos,
     produtos: renderProdutos,
     clientes: renderClientes,

@@ -756,7 +756,7 @@ select.form-control option {
 .pdv-container {
     display: grid;
     grid-template-columns: 480px 1fr;
-    height: 100%;
+    height: calc(100vh - 180px);
     gap: 1px;
     background: var(--border);
 }
@@ -1055,4 +1055,25 @@ select.form-control option {
         margin-top: 10px;
         font-size: 10px;
     }
+}
+
+/* PDV Footer Bar */
+.pdv-footer-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border);
+}
+
+.pdv-footer-info {
+    display: flex;
+    gap: 16px;
+    font-size: 0.9rem;
+}
+
+.pdv-footer-actions {
+    display: flex;
+    gap: 12px;
 }
