@@ -14,9 +14,6 @@ export async function renderPagamentos(container) {
         <div class="page-title">💳 Pagamentos</div>
         <div class="page-subtitle">Histórico financeiro do estabelecimento</div>
       </div>
-      <div class="page-actions">
-        <button class="btn btn-primary btn-md" id="btn-novo-pag">+ Registrar Pagamento</button>
-      </div>
     </div>
     <div class="table-wrap">
       <div class="table-toolbar">
@@ -47,7 +44,6 @@ export async function renderPagamentos(container) {
 
   await loadPagamentos(tiposPag, comandas, clientes);
 
-  document.getElementById('btn-novo-pag').addEventListener('click', () => abrirModalPagamento(tiposPag, comandas));
   document.getElementById('search-pag').addEventListener('input', () => filtrarPagamentos());
   document.getElementById('filter-tipo').addEventListener('change', () => filtrarPagamentos());
   document.getElementById('filter-dataini').addEventListener('change', () => filtrarPagamentos());
@@ -84,7 +80,8 @@ async function loadPagamentos(tiposPag, comandas, clientes) {
       mesa_name: c.mesa_name || '',
       status: c.status,
       dt_open: c.dt_open,
-      client: c.client
+      client: c.client,
+      user: c.user
     };
     return acc;
   }, {});
@@ -97,11 +94,46 @@ async function loadPagamentos(tiposPag, comandas, clientes) {
   }
 
   window._pagsFiltered = _pagsData;
-renderPagsTableFiltered(_pagsData);
+  renderPagsTableFiltered(_pagsData);
+}
+
+function filtrarPagamentos() {
+  const search = (document.getElementById('search-pag')?.value || '').toLowerCase();
+  const tipo = document.getElementById('filter-tipo')?.value || '';
+  const dataIni = document.getElementById('filter-dataini')?.value;
+  const dataFim = document.getElementById('filter-datafim')?.value;
+
+  const filtered = _pagsData.filter(p => {
+    if (tipo && String(p.type_pay) !== tipo) return false;
+
+    if (dataIni) {
+      const pDate = new Date(p.datetime);
+      const iniDate = new Date(dataIni);
+      if (pDate < iniDate) return false;
+    }
+    if (dataFim) {
+      const pDate = new Date(p.datetime);
+      const fimDate = new Date(dataFim);
+      fimDate.setHours(23, 59, 59, 999);
+      if (pDate > fimDate) return false;
+    }
+
+    if (search) {
+      const cInfo = _cmdMap[String(p.comanda)];
+      const clienteNome = _clientesMap[String(p.client)] || p.client_name || '';
+      const cDesc = cInfo ? `${cInfo.name} ${cInfo.mesa}` : (p.comanda_name || '');
+      const searchStr = `${p.id} ${clienteNome} ${p.comanda} ${cDesc} ${p.description} ${p.value}`.toLowerCase();
+      if (!searchStr.includes(search)) return false;
+    }
+
+    return true;
+  });
+
+  window._pagsFiltered = filtered;
+  renderPagsTableFiltered(filtered);
 }
 
 function renderPagsTableFiltered(filtered) {
-  const wrap = document.getElementById('pagamentos-table');
   const wrap = document.getElementById('pagamentos-table');
   if (!wrap) return;
 
@@ -211,7 +243,7 @@ function imprimirRelatorio() {
     <body>
       <div class="rel">
         <div class="header">
-          <div class="title">RRBEC - Bar & Restaurante</div>
+          <div class="title">Raul Rock Bar & Café</div>
           <div class="periodo">Relatório de Pagamentos</div>
           <div class="periodo">${dataIniStr} - ${dataFimStr}</div>
         </div>
